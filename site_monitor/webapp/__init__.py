@@ -3,6 +3,7 @@ results. Everything this tool does is reachable from a browser."""
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -31,6 +32,10 @@ from . import auth
 log = logging.getLogger(__name__)
 
 TEMPLATES = Path(__file__).parent / "templates"
+
+# Cost of a wrong password. Long enough to make online guessing
+# hopeless, short enough that a typo is not annoying.
+LOGIN_FAILURE_DELAY = 0.75
 
 
 def _normalize_domain(raw: str) -> str:
@@ -111,6 +116,7 @@ def create_app(base_settings: Settings) -> FastAPI:
 
     manager = RunManager(current_settings())
     scheduler = Scheduler(manager, base_settings)
+    throttle = auth.LoginThrottle()
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -174,10 +180,26 @@ def create_app(base_settings: Settings) -> FastAPI:
     @app.post("/login")
     async def login(request: Request, password: str = Form("")):
         settings = current_settings()
+        key = auth.client_key(request)
+
+        remaining = throttle.locked_for(key)
+        if remaining:
+            minutes = max(1, round(remaining / 60))
+            return render(
+                request,
+                "login.html",
+                error=f"Too many attempts. Try again in {minutes} minute"
+                f"{'s' if minutes != 1 else ''}.",
+            )
+
         if not auth.password_matches(settings.dashboard_password, password):
-            client = request.client.host if request.client else "unknown"
-            log.warning("failed dashboard login from %s", client)
+            throttle.record_failure(key)
+            log.warning("failed dashboard login from %s", key)
+            # A fixed cost per guess, which no spoofed header can avoid.
+            await asyncio.sleep(LOGIN_FAILURE_DELAY)
             return render(request, "login.html", error="That password is not correct.")
+
+        throttle.reset(key)
         response = RedirectResponse("/", status_code=303)
         response.set_cookie(
             auth.COOKIE_NAME,

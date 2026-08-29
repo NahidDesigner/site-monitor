@@ -342,3 +342,87 @@ def test_unknown_timezone_falls_back_to_utc():
     from site_monitor.webapp import _local_filter
 
     assert _local_filter("Mars/Olympus")("2026-08-29T07:00:00+00:00").endswith("UTC")
+
+
+# -- login throttling ---------------------------------------------------------
+
+
+def test_throttle_locks_a_client_after_repeated_failures():
+    from site_monitor.webapp.auth import LoginThrottle
+
+    throttle = LoginThrottle(max_attempts=3, window_seconds=900)
+
+    for _ in range(3):
+        assert throttle.locked_for("1.2.3.4") == 0
+        throttle.record_failure("1.2.3.4")
+
+    assert throttle.locked_for("1.2.3.4") > 0
+
+
+def test_throttle_is_per_client(_=None):
+    from site_monitor.webapp.auth import LoginThrottle
+
+    throttle = LoginThrottle(max_attempts=2)
+    throttle.record_failure("1.2.3.4")
+    throttle.record_failure("1.2.3.4")
+
+    assert throttle.locked_for("1.2.3.4") > 0
+    assert throttle.locked_for("5.6.7.8") == 0
+
+
+def test_throttle_forgets_attempts_once_the_window_passes():
+    from site_monitor.webapp.auth import LoginThrottle
+
+    throttle = LoginThrottle(max_attempts=2, window_seconds=60)
+    throttle.record_failure("1.2.3.4", now=1000.0)
+    throttle.record_failure("1.2.3.4", now=1000.0)
+
+    assert throttle.locked_for("1.2.3.4", now=1030.0) > 0
+    assert throttle.locked_for("1.2.3.4", now=1100.0) == 0
+
+
+def test_a_successful_sign_in_clears_the_count():
+    from site_monitor.webapp.auth import LoginThrottle
+
+    throttle = LoginThrottle(max_attempts=3)
+    throttle.record_failure("1.2.3.4")
+    throttle.record_failure("1.2.3.4")
+
+    throttle.reset("1.2.3.4")
+
+    assert throttle.locked_for("1.2.3.4") == 0
+
+
+def test_client_key_prefers_the_forwarded_address():
+    from site_monitor.webapp.auth import client_key
+
+    class Req:
+        headers = {"x-forwarded-for": "9.9.9.9, 10.0.0.1"}
+        client = type("C", (), {"host": "172.17.0.1"})()
+
+    assert client_key(Req()) == "9.9.9.9"
+
+
+def test_client_key_falls_back_to_the_socket_address():
+    from site_monitor.webapp.auth import client_key
+
+    class Req:
+        headers = {}
+        client = type("C", (), {"host": "172.17.0.1"})()
+
+    assert client_key(Req()) == "172.17.0.1"
+
+
+def test_repeated_bad_passwords_eventually_lock_the_login(client, monkeypatch):
+    """The end-to-end behaviour, not just the throttle in isolation."""
+    import site_monitor.webapp as webapp
+
+    monkeypatch.setattr(webapp, "LOGIN_FAILURE_DELAY", 0)
+
+    last = ""
+    for _ in range(11):
+        last = client.post("/login", data={"password": "guess"}).text
+
+    assert "Too many attempts" in last
+    # And the real password is refused too, while the lock holds.
+    assert "Too many attempts" in client.post("/login", data={"password": PASSWORD}).text
