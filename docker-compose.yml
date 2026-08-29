@@ -1,19 +1,21 @@
-# Coolify: deploy as a "Docker Compose" resource, then add a Scheduled Task
-# with the command `python -m site_monitor check` against the `monitor` service.
+# Coolify deploys this as a "Docker Compose" resource.
+#
+# The container idles; the check itself runs as a Coolify Scheduled Task, which
+# execs into this service on a cron. Nothing is declared here that Coolify
+# supplies at runtime -- environment variables come from the Coolify UI, not an
+# env_file, because .env is gitignored and a missing env_file aborts the deploy.
 services:
   monitor:
     build: .
-    env_file:
-      - .env
-    volumes:
-      - ./sites.yaml:/app/sites.yaml:ro
-      - monitor-data:/data
     environment:
       DATABASE_PATH: /data/site-monitor.db
-    # Keeps the container alive so Coolify scheduled tasks have somewhere to
-    # exec. The check itself is the scheduled command, not this process.
-    command: ["sleep", "infinity"]
+      SITES_FILE: /app/sites.yaml
+    volumes:
+      - monitor-data:/data
+    # Keeps the container alive so scheduled tasks have somewhere to exec.
+    # The check is the scheduled command, not this process.
     entrypoint: []
+    command: ["sleep", "infinity"]
     restart: unless-stopped
 
 volumes:
