@@ -1,0 +1,20 @@
+# Coolify: deploy as a "Docker Compose" resource, then add a Scheduled Task
+# with the command `python -m site_monitor check` against the `monitor` service.
+services:
+  monitor:
+    build: .
+    env_file:
+      - .env
+    volumes:
+      - ./sites.yaml:/app/sites.yaml:ro
+      - monitor-data:/data
+    environment:
+      DATABASE_PATH: /data/site-monitor.db
+    # Keeps the container alive so Coolify scheduled tasks have somewhere to
+    # exec. The check itself is the scheduled command, not this process.
+    command: ["sleep", "infinity"]
+    entrypoint: []
+    restart: unless-stopped
+
+volumes:
+  monitor-data:

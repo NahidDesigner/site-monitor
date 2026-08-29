@@ -1,0 +1,18 @@
+# Each site needs a domain (used to group alerts) and an absolute sitemap URL.
+#
+# Common WordPress sitemap locations:
+#   Yoast SEO     https://example.com/sitemap_index.xml
+#   Rank Math     https://example.com/sitemap_index.xml
+#   WP core       https://example.com/wp-sitemap.xml
+# Sitemap indexes are followed automatically.
+
+sites:
+  - domain: dvlfirm.com
+    sitemap: https://dvlfirm.com/sitemap_index.xml
+
+  - domain: example.com
+    sitemap: https://example.com/wp-sitemap.xml
+    # Optional per-site cap; overrides MAX_PAGES_PER_SITE.
+    max_pages: 200
+    # Optional; set false to keep the entry but skip it.
+    enabled: true
