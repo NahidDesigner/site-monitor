@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% from "_macros.html" import ago %}
+{% block title %}Report {{ run['id'] }} · Site Monitor{% endblock %}
+{% block body %}
+<div class="head">
+  <div>
+    <h1>Report {{ run['id'] }}</h1>
+    <p>Started {{ ago(run['started_at']) }} · {{ run['status'] }}</p>
+  </div>
+  <span class="spacer"></span>
+  <a class="btn btn-sm" href="/export/broken.csv?run_id={{ run['id'] }}">Download CSV</a>
+  <a class="btn btn-sm" href="/export/broken.xlsx?run_id={{ run['id'] }}">Download Excel</a>
+  <a class="btn" href="/runs">All reports</a>
+</div>
+
+<div class="tiles">
+  <div class="tile"><div class="k">Sites</div><div class="v">{{ run['sites_checked'] }}</div></div>
+  <div class="tile"><div class="k">Pages</div><div class="v">{{ '{:,}'.format(run['pages_checked']) }}</div></div>
+  <div class="tile"><div class="k">Stylesheets</div><div class="v">{{ '{:,}'.format(run['assets_checked']) }}</div></div>
+  <div class="tile {{ 'bad' if run['broken_assets'] else 'ok' }}">
+    <div class="k">Broken</div><div class="v">{{ run['broken_assets'] }}</div></div>
+</div>
+
+{% if run['error'] %}<div class="banner err">{{ run['error'] }}</div>{% endif %}
+
+{% if grouped %}
+<div class="card">
+  <h2>Broken stylesheets</h2>
+  {% for domain, rows in grouped.items() %}
+  <div class="finding">
+    <h3>{{ domain }} <span class="pill bad">{{ rows|length }}</span></h3>
+    {% for row in rows %}
+      <p class="pg"><a href="{{ row['page_url'] }}" target="_blank" rel="noopener">{{ row['page_url'] }}</a></p>
+      <p class="as">{{ row['asset_url'] }}<br><span class="why">{{ row['reason'] }}</span></p>
+    {% endfor %}
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="card"><h2>Broken stylesheets</h2>
+  <p style="color:var(--ok);margin:0;font-size:14px">Nothing broken in this run.</p></div>
+{% endif %}
+
+{% if errors %}
+<div class="card">
+  <h2>Pages that could not be reached</h2>
+  <div class="tablewrap"><table>
+    <tr><th>Site</th><th>Page</th><th>Problem</th></tr>
+    {% for row in errors %}
+    <tr><td>{{ row['domain'] }}</td><td class="u">{{ row['page_url'] }}</td><td>{{ row['error'] }}</td></tr>
+    {% endfor %}
+  </table></div>
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>Per site</h2>
+  <div class="tablewrap"><table>
+    <tr><th>Site</th><th class="num">Pages</th><th class="num">Stylesheets</th>
+        <th class="num">Broken</th><th class="num">Took</th><th>Problem</th></tr>
+    {% for row in site_runs %}
+    <tr>
+      <td>{{ row['domain'] }}</td>
+      <td class="num">{{ row['pages_checked'] }}</td>
+      <td class="num">{{ row['assets_checked'] }}</td>
+      <td class="num">{% if row['broken_assets'] %}<strong style="color:var(--bad)">{{ row['broken_assets'] }}</strong>{% else %}0{% endif %}</td>
+      <td class="num">{{ (row['duration_ms']/1000)|round(1) }}s</td>
+      <td style="color:var(--warn);font-size:12.5px">{{ row['error'] or '' }}</td>
+    </tr>
+    {% endfor %}
+  </table></div>
+</div>
+{% endblock %}

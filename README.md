@@ -48,6 +48,23 @@ exact case is pinned as a regression test in
 
 ---
 
+## What you get
+
+A single container running a web dashboard that manages everything:
+
+| | |
+|---|---|
+| **Overview** | What is broken right now, grouped by site, with recent history |
+| **Sites** | Add, edit, pause and remove sites and their page lists |
+| **Reports** | Every check ever run, with per-site detail, downloadable |
+| **PageSpeed** | Lighthouse history, sortable by score, LCP, CLS, TBT or date |
+| **Schedules** | Cron schedules the app runs itself — no platform cron needed |
+| **Settings** | Telegram, PageSpeed key and crawl limits, editable without a redeploy |
+
+Every report downloads as CSV or a formatted Excel workbook.
+
+---
+
 ## Quick start
 
 ```bash
@@ -57,117 +74,79 @@ cd site-monitor
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-cp .env.example .env            # fill in the Telegram credentials
-cp sites.example.yaml sites.yaml # add your sites
+cp .env.example .env       # set DASHBOARD_PASSWORD at minimum
+python -m site_monitor serve
+```
 
-# Confirm the detector against a single page before wiring up cron:
+Then open <http://localhost:8080>, sign in, and add a site — or paste a whole
+list into **Sites → Import**.
+
+To try the detector against one page without any setup:
+
+```bash
 python -m site_monitor check-url https://dvlfirm.com/business-law/trust-restatement/
-
-# Full run, printing the Telegram message instead of sending it:
-python -m site_monitor check --no-alert
 ```
 
 ---
 
-## Configuration
+## Where configuration lives
 
-### `sites.yaml`
+**The database is the source of truth.** Sites, schedules and most settings are
+stored in SQLite and edited in the dashboard, because a monitoring tool you
+have to redeploy to change is a monitoring tool nobody updates.
 
-Pages come from one of two sources per site.
+Three things stay environment-only, since letting a web form change them would
+mean a stolen session could repoint the app: `DASHBOARD_PASSWORD`,
+`DATABASE_PATH` and `TIMEZONE`.
 
-**A curated list** — exact, cheap, and what you want when you already know which
-pages matter:
-
-```yaml
-sites:
-  - domain: dvlfirm.com
-    pages:
-      - https://dvlfirm.com/
-      - https://dvlfirm.com/business-law/trust-restatement/
-```
-
-**A sitemap** — broader, catches pages nobody curated, but crawls whatever the
-SEO plugin publishes:
-
-```yaml
-sites:
-  - domain: example.com
-    sitemap: https://example.com/wp-sitemap.xml
-    max_pages: 200   # optional per-site cap
-    enabled: true    # optional; false skips the site
-```
-
-Duplicate URLs in a curated list are dropped at load. If a site gives both,
-`pages` wins — the explicit instruction is the more specific one — and the
-sitemap is kept only as documentation.
-
-Sitemap **indexes** are followed automatically (nested up to 4 levels), and
-`.xml.gz` sitemaps are decompressed. Yoast, Rank Math, All in One SEO and WP
-core sitemaps all work as-is.
-
-Don't hand-write the file for a large fleet — use `discover`:
-
-```bash
-python -m site_monitor discover --from-file domains.txt -o sites.yaml
-```
-
-It reads each domain's `robots.txt` first (authoritative), falls back to
-probing the known plugin paths, confirms the sitemap yields pages, and samples
-one page per site to report how many Elementor stylesheets it finds. Domains it
-cannot resolve are written as comments rather than dropped.
-
-Then pre-flight the result before deploying:
-
-```bash
-python -m site_monitor validate
-```
-
-### `.env`
-
-Real environment variables take precedence over `.env`, so Coolify's injected
-variables win — as they should.
-
-| Variable | Default | Purpose |
+| Variable | Required | Purpose |
 |---|---|---|
-| `TELEGRAM_BOT_TOKEN` | — | From @BotFather. |
-| `TELEGRAM_CHAT_ID` | — | Your user id, or a group id (`-100…`). |
-| `SITES_FILE` | `sites.yaml` | Site list location. |
-| `DATABASE_PATH` | `data/site-monitor.db` | SQLite file; put it on a volume. |
-| `SITE_CONCURRENCY` | `3` | Sites checked in parallel. |
-| `PAGE_CONCURRENCY` | `8` | Pages in parallel, per site. |
-| `ASSET_CONCURRENCY` | `12` | Stylesheet `HEAD`s in parallel, per page. |
-| `REQUEST_TIMEOUT` | `20` | Seconds. |
-| `MAX_RETRIES` | `3` | Attempts per request. |
-| `RETRY_BACKOFF` | `1.0` | Seconds; doubles each attempt, with jitter. |
-| `USER_AGENT` | desktop Chrome | Some stacks vary HTML by UA. |
-| `MAX_PAGES_PER_SITE` | `0` | `0` = every page in the sitemap. |
-| `LOG_LEVEL` | `INFO` | |
-| `DRY_RUN` | `false` | `true` prints alerts instead of sending. |
+| `DASHBOARD_PASSWORD` | **yes** | The app refuses to start without it. |
+| `DATABASE_PATH` | | Default `data/site-monitor.db`. Put it on a volume. |
+| `TIMEZONE` | | How schedule times are read and shown. Default `UTC`. |
+| `SESSION_SECRET` | | Signs cookies. Derived from the password if unset. |
+| `SITES_FILE` | | Optional seed, imported once if the database is empty. |
+| `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | | Also settable in the dashboard. |
+| `PAGESPEED_API_KEY` | | Also settable in the dashboard. |
+| `SITE_` / `PAGE_` / `ASSET_CONCURRENCY` | | Also settable in the dashboard. |
 
-Concurrency is enforced at all three levels with semaphores, and the connection
-pool is sized to match, so the ceiling on in-flight requests is
-`SITE_CONCURRENCY × max(PAGE_CONCURRENCY, ASSET_CONCURRENCY)`.
-
-Retries cover transport errors and transient statuses (408, 425, 429, 5xx) with
-exponential backoff plus jitter. **404 is never retried** — it is the answer this
-tool is looking for.
+Anything saved in **Settings** overrides the matching environment variable.
 
 ---
 
-## Commands
+## Schedules
+
+Schedules live in the app, not the platform. Add one in the dashboard with a
+standard five-field cron expression (or `@daily`, `@hourly`), pick whether it
+runs the CSS check or a PageSpeed sweep, and the app fires it itself.
+
+Times are read and displayed in `TIMEZONE`, so "3am" means 3am where you are.
+A schedule is armed rather than fired when you save it, and a restart neither
+loses nor double-fires one.
+
+Two runs of the same kind never overlap: a second trigger while one is in
+flight is refused, because two concurrent passes would double the request load
+on every monitored origin.
+
+---
+
+## Command line
+
+The CLI still does everything, which is what cron used to need and what
+scripting still wants.
 
 | Command | Does |
 |---|---|
-| `python -m site_monitor check` | Check every site, store the run, alert if broken. **The cron entry point.** |
-| `python -m site_monitor check --no-alert` | Same, but print the Telegram message instead of sending it. |
-| `python -m site_monitor check-url <url>` | Check one page. Needs no `sites.yaml`. |
-| `python -m site_monitor check-site <domain>` | Check one configured site. |
-| `python -m site_monitor discover <domains>` | Resolve sitemaps for a domain list and emit `sites.yaml`. |
-| `python -m site_monitor validate` | Pre-flight the configured sites without a full check. |
-| `python -m site_monitor history [--limit N]` | Recent runs from the database. |
+| `serve` | Run the dashboard and scheduler. **The container entry point.** |
+| `check` | Run one full check, store it, alert if anything is broken. |
+| `check-url <url>` | Check one page. Needs no configuration at all. |
+| `check-site <domain>` | Check one configured site. |
+| `sites list` / `sites import <file>` / `sites remove <domain>` | Manage the site list. |
+| `discover <domains>` | Resolve sitemaps for a domain list, emit `sites.yaml`. |
+| `validate` | Pre-flight every site without a full check. |
+| `history` | Recent runs. |
 
-**Exit codes:** `0` nothing broken · `1` breakages found · `2` the run itself failed.
-That split lets a cron wrapper tell "the site is broken" from "the monitor is broken".
+**Exit codes:** `0` nothing broken · `1` breakages found · `2` the monitor itself failed.
 
 ---
 
@@ -264,7 +243,7 @@ pip install -r requirements-dev.txt
 python -m pytest
 ```
 
-98 tests, no network access required — every HTTP interaction runs through
+217 tests, no network access required — every HTTP interaction runs through
 `httpx.MockTransport`, including a fixture that reproduces the dvlfirm.com
 breakage byte for byte.
 
@@ -276,10 +255,16 @@ site_monitor/
   http.py       browser-like AsyncClient, retries with backoff
   sitemap.py    sitemap/index walking, gzip, dedupe
   elementor.py  the detection itself: extract hrefs, HEAD, judge
-  discovery.py  sitemap discovery and pre-flight probing
   crawler.py    orchestration and concurrency limits
-  db.py         SQLite schema and writes
+  discovery.py  sitemap discovery and pre-flight probing
+  pagespeed.py  PageSpeed Insights client and sweep
+  cron.py       five-field cron parsing, timezone aware
+  scheduler.py  in-process cron loop
+  runner.py     executing a run, and tracking one in progress
+  db.py         SQLite schema, site list, settings, history
   notifier.py   Telegram formatting and delivery
+  exports.py    CSV and Excel reports
+  webapp/       the dashboard (FastAPI + Jinja templates)
   cli.py        argparse entry points
 ```
 

@@ -1,9 +1,12 @@
 # Coolify deploys this as a "Docker Compose" resource.
 #
-# The container idles; the check itself runs as a Coolify Scheduled Task, which
-# execs into this service on a cron. Nothing is declared here that Coolify
-# supplies at runtime -- environment variables come from the Coolify UI, not an
-# env_file, because .env is gitignored and a missing env_file aborts the deploy.
+# One long-running service. The dashboard serves the UI and runs the schedules
+# itself, so there is nothing to configure outside the app -- no Coolify
+# scheduled task, no crontab.
+#
+# Nothing that Coolify supplies at runtime is declared here: environment
+# variables come from the Coolify UI, not an env_file, because .env is
+# gitignored and a missing env_file aborts the deploy.
 services:
   monitor:
     build: .
@@ -12,11 +15,16 @@ services:
       SITES_FILE: /app/sites.yaml
     volumes:
       - monitor-data:/data
-    # Keeps the container alive so scheduled tasks have somewhere to exec.
-    # The check is the scheduled command, not this process.
-    entrypoint: []
-    command: ["sleep", "infinity"]
+    ports:
+      - "8080"
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8080/healthz')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
 volumes:
   monitor-data:

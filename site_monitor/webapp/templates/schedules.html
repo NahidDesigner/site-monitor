@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% from "_macros.html" import banner, ago %}
+{% block title %}Schedules · Site Monitor{% endblock %}
+{% block body %}
+{{ banner(message or request.query_params.get('message'), error or request.query_params.get('error')) }}
+
+<div class="head">
+  <div><h1>Schedules</h1><p>The app runs these itself. Times you enter, and times shown here, are {{ tz }}.</p></div>
+</div>
+
+{% if schedules %}
+<div class="card" style="padding:0">
+  <div class="tablewrap"><table>
+    <tr><th>Name</th><th>What it runs</th><th>When</th><th>Next</th><th>Last</th><th></th></tr>
+    {% for row in schedules %}
+    <tr>
+      <td><strong>{{ row['name'] }}</strong>
+          {% if not row['enabled'] %}<span class="pill off">paused</span>{% endif %}</td>
+      <td>{{ 'PageSpeed test' if row['kind']=='pagespeed' else 'Elementor CSS check' }}</td>
+      <td>{{ row['description'] }}<br><span class="mono" style="font-size:11.5px;color:var(--ink-faint)">{{ row['cron'] }}</span></td>
+      <td style="font-size:12px">{{ ago(row['next_run_at']) }}</td>
+      <td style="font-size:12px">{{ ago(row['last_run_at']) }}
+          {% if row['last_status'] %}<br><span style="color:var(--ink-faint)">{{ row['last_status'] }}</span>{% endif %}</td>
+      <td style="text-align:right;white-space:nowrap">
+        <form method="post" action="/schedules/{{ row['id'] }}/run" style="display:inline">
+          <button class="btn-sm" type="submit">Run now</button></form>
+        <form method="post" action="/schedules/{{ row['id'] }}/toggle" style="display:inline">
+          <button class="btn-sm" type="submit">{{ 'Pause' if row['enabled'] else 'Resume' }}</button></form>
+        <form method="post" action="/schedules/{{ row['id'] }}/delete" style="display:inline"
+              onsubmit="return confirm('Delete this schedule?')">
+          <button class="btn-sm btn-danger" type="submit">Delete</button></form>
+      </td>
+    </tr>
+    {% endfor %}
+  </table></div>
+</div>
+{% else %}
+<div class="card empty"><p>Nothing scheduled yet. Checks only run when you press “Run check now”.</p></div>
+{% endif %}
+
+<div class="card">
+  <h2>Add a schedule</h2>
+  <form method="post" action="/schedules/save">
+    <div class="row">
+      <div class="field">
+        <label for="name">Name</label>
+        <input id="name" name="name" type="text" placeholder="Every 6 hours" required>
+      </div>
+      <div class="field">
+        <label for="kind">What to run</label>
+        <select id="kind" name="kind">
+          <option value="css_check">Elementor CSS check</option>
+          <option value="pagespeed">PageSpeed test</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="cron">When</label>
+        <input id="cron" name="cron" type="text" value="0 */6 * * *" required list="presets">
+        <datalist id="presets">
+          <option value="0 * * * *">Every hour</option>
+          <option value="0 */2 * * *">Every 2 hours</option>
+          <option value="0 */4 * * *">Every 4 hours</option>
+          <option value="0 */6 * * *">Every 6 hours</option>
+          <option value="0 */12 * * *">Every 12 hours</option>
+          <option value="0 3 * * *">Every day at 3am</option>
+          <option value="0 0 * * 1">Every Monday</option>
+        </datalist>
+        <p class="hint">Cron format: minute hour day month weekday. Start typing for presets.</p>
+      </div>
+    </div>
+    <label class="check" style="margin-bottom:16px">
+      <input type="checkbox" name="enabled" value="1" checked> Active</label><br>
+    <button class="btn-primary" type="submit">Add schedule</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>How often should the CSS check run?</h2>
+  <p style="font-size:13.5px;color:var(--ink-soft);margin:0">
+    The breakage this catches heals itself once the cache refreshes, so the schedule decides how
+    much of it you see. Every 6 hours is a reasonable start. Tighten it if breaks turn out to be
+    short-lived; loosen it if runs get expensive — a full check is roughly
+    <strong>15 requests per page</strong>, so the cost scales with how many pages you watch.</p>
+</div>
+{% endblock %}

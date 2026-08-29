@@ -96,6 +96,17 @@ class Settings:
     log_level: str = "INFO"
     dry_run: bool = False
 
+    # PageSpeed Insights
+    pagespeed_api_key: str | None = None
+    pagespeed_strategies: tuple[str, ...] = ("mobile", "desktop")
+
+    timezone: str = "UTC"
+
+    # Dashboard
+    dashboard_password: str | None = None
+    session_secret: str = ""
+    session_hours: int = 720  # 30 days
+
     sites: tuple[Site, ...] = field(default_factory=tuple)
 
     @classmethod
@@ -121,7 +132,19 @@ class Settings:
             max_pages_per_site=_env_int("MAX_PAGES_PER_SITE", 0),
             log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
             dry_run=_env_bool("DRY_RUN", False),
-            sites=load_sites(sites_file),
+            pagespeed_api_key=os.getenv("PAGESPEED_API_KEY") or None,
+            timezone=os.getenv("TIMEZONE", "UTC"),
+            dashboard_password=os.getenv("DASHBOARD_PASSWORD") or None,
+            # Without an explicit secret, sessions are signed with a key
+            # derived from the password. That means changing the password
+            # invalidates every existing session, which is the behaviour you
+            # want anyway.
+            session_secret=os.getenv("SESSION_SECRET")
+            or f"derived:{os.getenv('DASHBOARD_PASSWORD', '')}",
+            session_hours=_env_int("SESSION_HOURS", 720),
+            # sites.yaml is now only an import source; the database is the
+            # source of truth, so a missing file is not an error.
+            sites=load_sites(sites_file) if sites_file.is_file() else (),
         )
 
     @property
@@ -197,3 +220,53 @@ def load_sites(path: str | os.PathLike[str]) -> tuple[Site, ...]:
             )
         )
     return tuple(sites)
+
+
+# Settings the dashboard stores in the database, and how to coerce them back
+# out of TEXT columns.
+_OVERRIDE_CASTS = {
+    "telegram_bot_token": str,
+    "telegram_chat_id": str,
+    "pagespeed_api_key": str,
+    "user_agent": str,
+    "site_concurrency": int,
+    "page_concurrency": int,
+    "asset_concurrency": int,
+    "max_retries": int,
+    "max_pages_per_site": int,
+    "request_timeout": float,
+}
+
+
+def apply_overrides(base: Settings, overrides: dict[str, str]) -> Settings:
+    """Layer database-stored settings over the environment.
+
+    The dashboard has to be able to change a Telegram token without a
+    redeploy, so what is stored wins over what the environment supplied. A
+    malformed stored value is ignored rather than crashing the run -- the
+    environment value is still there to fall back on.
+    """
+    if not overrides:
+        return base
+
+    values = dict(base.__dict__)
+    for key, cast in _OVERRIDE_CASTS.items():
+        raw = overrides.get(key)
+        if raw is None or str(raw).strip() == "":
+            continue
+        try:
+            values[key] = cast(raw)
+        except (TypeError, ValueError):
+            continue
+
+    raw_strategies = (overrides.get("pagespeed_strategies") or "").strip()
+    if raw_strategies:
+        picked = tuple(
+            part.strip().lower()
+            for part in raw_strategies.split(",")
+            if part.strip().lower() in {"mobile", "desktop"}
+        )
+        if picked:
+            values["pagespeed_strategies"] = picked
+
+    return Settings(**values)

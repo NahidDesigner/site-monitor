@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{% block title %}Site Monitor{% endblock %}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --paper:#F4F5F7; --surface:#FFFFFF; --surface-2:#EDEFF2;
+  --ink:#16202B; --ink-soft:#4A5765; --ink-faint:#7C8894;
+  --rule:#DDE1E6; --rule-strong:#C4CBD3;
+  --copper:#A85434; --copper-ink:#FFFFFF; --copper-wash:#F6EAE3;
+  --ok:#3E7263; --ok-wash:#E6F0EC;
+  --warn:#8A6410; --warn-wash:#F8EFDC;
+  --bad:#A3342F; --bad-wash:#F8E7E5;
+  --mono:'JetBrains Mono',ui-monospace,Menlo,monospace;
+  --sans:'Archivo',system-ui,-apple-system,sans-serif;
+}
+@media (prefers-color-scheme:dark){:root{
+  --paper:#0F1720; --surface:#16202B; --surface-2:#1C2836;
+  --ink:#E6EAEE; --ink-soft:#A6B2BE; --ink-faint:#74818E;
+  --rule:#263341; --rule-strong:#354557;
+  --copper:#D98661; --copper-ink:#16202B; --copper-wash:#2B1E17;
+  --ok:#6FAE9A; --ok-wash:#16261F;
+  --warn:#C9A24A; --warn-wash:#241D0F;
+  --bad:#E0796F; --bad-wash:#2B1817;
+}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);
+  font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+a{color:var(--copper);text-underline-offset:2px}
+h1{font-size:1.5rem;font-weight:700;letter-spacing:-.02em;margin:0 0 4px}
+h2{font-size:1.02rem;font-weight:600;margin:0 0 12px;letter-spacing:-.005em}
+.mono{font-family:var(--mono)}
+
+/* nav */
+nav{background:var(--surface);border-bottom:1px solid var(--rule);position:sticky;top:0;z-index:20}
+.nav-in{max-width:1120px;margin:0 auto;padding:0 22px;display:flex;align-items:center;
+  gap:26px;height:58px;flex-wrap:wrap}
+.brand{font-weight:700;letter-spacing:-.02em;font-size:15px;text-decoration:none;color:var(--ink);
+  display:flex;align-items:center;gap:8px}
+.brand .dot{width:8px;height:8px;border-radius:50%;background:var(--copper)}
+.nav-links{display:flex;gap:20px;margin-right:auto}
+.nav-links a{color:var(--ink-soft);text-decoration:none;font-size:13.5px;font-weight:500;
+  padding:4px 0;border-bottom:2px solid transparent}
+.nav-links a:hover{color:var(--ink)}
+.nav-links a.on{color:var(--ink);border-bottom-color:var(--copper)}
+
+/* buttons */
+button,.btn{font-family:var(--sans);font-size:13px;font-weight:600;cursor:pointer;
+  border-radius:5px;padding:8px 14px;border:1px solid var(--rule-strong);
+  background:var(--surface);color:var(--ink);text-decoration:none;display:inline-block}
+button:hover,.btn:hover{border-color:var(--copper);color:var(--copper)}
+.btn-primary{background:var(--copper);border-color:var(--copper);color:var(--copper-ink)}
+.btn-primary:hover{filter:brightness(1.08);color:var(--copper-ink)}
+.btn-primary[disabled]{opacity:.5;cursor:not-allowed;filter:none}
+.btn-danger:hover{border-color:var(--bad);color:var(--bad)}
+.btn-sm{padding:5px 10px;font-size:12px}
+:focus-visible{outline:2px solid var(--copper);outline-offset:2px}
+
+main{max-width:1120px;margin:0 auto;padding:28px 22px 80px}
+.head{display:flex;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:22px}
+.head p{margin:0;color:var(--ink-soft);font-size:13.5px}
+.spacer{margin-left:auto}
+
+/* cards */
+.card{background:var(--surface);border:1px solid var(--rule);border-radius:7px;padding:18px 20px;margin-bottom:16px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(158px,1fr));gap:12px;margin-bottom:18px}
+.tile{background:var(--surface);border:1px solid var(--rule);border-radius:7px;padding:14px 16px}
+.tile .k{font-size:10.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--ink-faint);margin-bottom:6px}
+.tile .v{font-size:1.65rem;font-weight:700;letter-spacing:-.03em;font-variant-numeric:tabular-nums;line-height:1.1}
+.tile .s{font-size:12px;color:var(--ink-faint);margin-top:2px}
+.tile.bad .v{color:var(--bad)} .tile.ok .v{color:var(--ok)}
+
+/* tables */
+.tablewrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+th{text-align:left;font-size:10.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--ink-faint);padding:9px 12px;border-bottom:1px solid var(--rule);white-space:nowrap}
+td{padding:10px 12px;border-bottom:1px solid var(--rule);vertical-align:middle}
+tr:last-child td{border-bottom:none}
+td.num{font-variant-numeric:tabular-nums;text-align:right;font-family:var(--mono);font-size:12.5px}
+td .u{font-family:var(--mono);font-size:12px;word-break:break-all}
+
+/* pills */
+.pill{display:inline-block;font-size:10.5px;font-weight:600;letter-spacing:.06em;
+  text-transform:uppercase;padding:3px 8px;border-radius:20px;white-space:nowrap}
+.pill.ok{background:var(--ok-wash);color:var(--ok)}
+.pill.bad{background:var(--bad-wash);color:var(--bad)}
+.pill.warn{background:var(--warn-wash);color:var(--warn)}
+.pill.off{background:var(--surface-2);color:var(--ink-faint)}
+
+/* findings */
+.finding{border:1px solid var(--rule);border-left:3px solid var(--bad);border-radius:6px;
+  padding:13px 16px;margin-bottom:10px;background:var(--surface)}
+.finding h3{margin:0 0 8px;font-size:14px;font-weight:600}
+.finding .pg{font-family:var(--mono);font-size:12px;color:var(--ink-soft);margin:0 0 6px;word-break:break-all}
+.finding .as{font-family:var(--mono);font-size:12px;margin:0 0 3px;padding-left:14px;
+  border-left:2px solid var(--rule);word-break:break-all}
+.finding .why{color:var(--bad)}
+
+/* forms */
+label{display:block;font-size:12px;font-weight:600;letter-spacing:.04em;
+  text-transform:uppercase;color:var(--ink-faint);margin-bottom:6px}
+input[type=text],input[type=password],input[type=number],textarea,select{
+  width:100%;font-family:var(--mono);font-size:13px;padding:9px 11px;
+  border:1px solid var(--rule-strong);border-radius:5px;
+  background:var(--paper);color:var(--ink)}
+textarea{min-height:230px;resize:vertical;line-height:1.6}
+.field{margin-bottom:18px}
+.hint{font-size:12.5px;color:var(--ink-faint);margin:6px 0 0;font-family:var(--sans)}
+.row{display:flex;gap:16px;flex-wrap:wrap}
+.row>*{flex:1;min-width:190px}
+.check{display:flex;align-items:center;gap:9px;font-family:var(--sans);
+  font-size:13.5px;text-transform:none;letter-spacing:0;color:var(--ink);font-weight:500}
+.check input{width:16px;height:16px;accent-color:var(--copper)}
+
+/* banners */
+.banner{border-radius:6px;padding:11px 15px;margin-bottom:16px;font-size:13.5px;border:1px solid}
+.banner.ok{background:var(--ok-wash);border-color:var(--ok);color:var(--ok)}
+.banner.err{background:var(--bad-wash);border-color:var(--bad);color:var(--bad)}
+.banner.info{background:var(--warn-wash);border-color:var(--warn);color:var(--warn)}
+
+/* progress */
+#runbar,#psbar{display:none;background:var(--copper-wash);border-bottom:1px solid var(--copper)}
+#runbar.on,#psbar.on{display:block}
+.rb-in{max-width:1120px;margin:0 auto;padding:11px 22px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.rb-txt{font-size:13px;font-weight:600;color:var(--copper)}
+.rb-sub{font-size:12px;color:var(--ink-soft);font-family:var(--mono)}
+.track{flex:1;min-width:170px;height:5px;background:var(--surface-2);border-radius:3px;overflow:hidden}
+.track i{display:block;height:100%;background:var(--copper);width:0;transition:width .4s ease}
+
+.empty{text-align:center;padding:44px 20px;color:var(--ink-faint)}
+.empty p{margin:0 0 16px}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+@media (max-width:640px){.nav-in{height:auto;padding:12px 16px}main{padding:20px 16px 60px}}
+</style>
+</head>
+<body>
+<nav>
+  <div class="nav-in">
+    <a class="brand" href="/"><span class="dot"></span>Site Monitor</a>
+    <div class="nav-links">
+      <a href="/" class="{{ 'on' if active=='home' }}">Overview</a>
+      <a href="/sites" class="{{ 'on' if active=='sites' }}">Sites</a>
+      <a href="/runs" class="{{ 'on' if active=='runs' }}">Reports</a>
+      <a href="/pagespeed" class="{{ 'on' if active=='pagespeed' }}">PageSpeed</a>
+      <a href="/schedules" class="{{ 'on' if active=='schedules' }}">Schedules</a>
+      <a href="/settings" class="{{ 'on' if active=='settings' }}">Settings</a>
+    </div>
+    <form method="post" action="/run" id="runform">
+      <button class="btn-primary" type="submit" id="runbtn">Run check now</button>
+    </form>
+    <form method="post" action="/logout"><button class="btn-sm" type="submit">Sign out</button></form>
+  </div>
+</nav>
+
+<div id="runbar">
+  <div class="rb-in">
+    <span class="rb-txt" id="rb-txt">Checking…</span>
+    <div class="track"><i id="rb-fill"></i></div>
+    <span class="rb-sub" id="rb-sub"></span>
+  </div>
+</div>
+
+<div id="psbar">
+  <div class="rb-in">
+    <span class="rb-txt" id="ps-txt">Testing…</span>
+    <div class="track"><i id="ps-fill"></i></div>
+    <span class="rb-sub" id="ps-sub"></span>
+  </div>
+</div>
+
+<main>{% block body %}{% endblock %}</main>
+
+<script>
+(function(){
+  var bar=document.getElementById('runbar'), fill=document.getElementById('rb-fill'),
+      txt=document.getElementById('rb-txt'), sub=document.getElementById('rb-sub'),
+      btn=document.getElementById('runbtn'), timer=null, wasRunning=false;
+
+  function paint(p){
+    var running = p.state==='running';
+    bar.classList.toggle('on', running);
+    if(btn){ btn.disabled=running; btn.textContent = running ? 'Checking…' : 'Run check now'; }
+    if(running){
+      fill.style.width=p.percent+'%';
+      txt.textContent='Checking '+p.sites_done+' of '+p.sites_total+' sites';
+      sub.textContent=p.pages_checked+' pages · '+p.broken_assets+' broken'
+        + (p.current ? ' · '+p.current : '');
+      wasRunning=true;
+    } else if(wasRunning){
+      // A run just ended: reload so the page shows what it found.
+      wasRunning=false;
+      window.location.reload();
+    }
+    schedule(running ? 1500 : 8000);
+  }
+  function schedule(ms){ clearTimeout(timer); timer=setTimeout(poll, ms); }
+  function poll(){
+    fetch('/api/run/status',{headers:{'Accept':'application/json'}})
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(p){ if(p) paint(p); else schedule(15000); })
+      .catch(function(){ schedule(15000); });
+  }
+  var psbar=document.getElementById('psbar'), psfill=document.getElementById('ps-fill'),
+      pstxt=document.getElementById('ps-txt'), pssub=document.getElementById('ps-sub'),
+      psWas=false;
+
+  function paintPs(p){
+    var running=p.state==='running';
+    psbar.classList.toggle('on',running);
+    if(running){
+      psfill.style.width=p.percent+'%';
+      pstxt.textContent='PageSpeed '+p.done+' of '+p.total;
+      pssub.textContent=(p.failures?p.failures+' failed \u00b7 ':'')+(p.current||'');
+      psWas=true;
+    } else if(psWas){ psWas=false; window.location.reload(); }
+  }
+  function pollPs(){
+    fetch('/api/pagespeed/status',{headers:{'Accept':'application/json'}})
+      .then(function(r){ return r.ok?r.json():null; })
+      .then(function(p){ if(p) paintPs(p); })
+      .catch(function(){});
+  }
+  if(document.getElementById('runform')){
+    document.getElementById('runform').addEventListener('submit',function(){
+      if(btn){ btn.disabled=true; btn.textContent='Starting\u2026'; }
+    });
+    poll();
+    pollPs();
+    setInterval(pollPs, 4000);
+  }
+})();
+</script>
+</body>
+</html>

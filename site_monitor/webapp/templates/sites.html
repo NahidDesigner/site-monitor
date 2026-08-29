@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% from "_macros.html" import banner %}
+{% block title %}Sites · Site Monitor{% endblock %}
+{% block body %}
+{{ banner(message or request.query_params.get('message'), error or request.query_params.get('error')) }}
+
+<div class="head">
+  <div>
+    <h1>Sites</h1>
+    <p>{{ sites|length }} configured · {{ '{:,}'.format(sites|map(attribute='pages')|map('length')|sum) }} pages total</p>
+  </div>
+  <span class="spacer"></span>
+  <a class="btn" href="/import">Import a list</a>
+  <a class="btn btn-primary" href="/sites/new">Add a site</a>
+</div>
+
+{% if sites %}
+<div class="card" style="padding:0">
+  <div class="tablewrap"><table>
+    <tr><th>Domain</th><th>Source</th><th class="num">Pages</th><th>Status</th><th></th></tr>
+    {% for site in sites %}
+    <tr>
+      <td><a href="/sites/edit/{{ site.domain }}"><strong>{{ site.domain }}</strong></a></td>
+      <td style="color:var(--ink-faint);font-size:12.5px">
+        {% if site.pages %}curated list{% else %}<span class="mono">{{ site.sitemap }}</span>{% endif %}</td>
+      <td class="num">{{ site.pages|length if site.pages else '—' }}</td>
+      <td>{% if site.enabled %}<span class="pill ok">active</span>
+          {% else %}<span class="pill off">paused</span>{% endif %}</td>
+      <td style="text-align:right;white-space:nowrap">
+        <form method="post" action="/sites/{{ site.domain }}/toggle" style="display:inline">
+          <button class="btn-sm" type="submit">{{ 'Pause' if site.enabled else 'Resume' }}</button>
+        </form>
+        <a class="btn btn-sm" href="/sites/edit/{{ site.domain }}">Edit</a>
+        <form method="post" action="/sites/{{ site.domain }}/delete" style="display:inline"
+              onsubmit="return confirm('Remove {{ site.domain }} and its page list? Past reports are kept.')">
+          <button class="btn-sm btn-danger" type="submit">Remove</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </table></div>
+</div>
+{% else %}
+<div class="card empty">
+  <p>No sites yet.</p>
+  <a class="btn btn-primary" href="/sites/new">Add your first site</a>
+  <a class="btn" href="/import">Import a list</a>
+</div>
+{% endif %}
+{% endblock %}

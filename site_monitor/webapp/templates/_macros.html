@@ -1,0 +1,15 @@
+{% macro banner(message, error) %}
+  {% if error %}<div class="banner err">{{ error }}</div>{% endif %}
+  {% if message %}<div class="banner ok">{{ message }}</div>{% endif %}
+{% endmacro %}
+
+{% macro ago(value) %}{% if value %}<span class="mono" title="{{ value }} (stored as UTC)">{{ value|local }}</span>{% else %}—{% endif %}{% endmacro %}
+
+{% macro score(value) %}
+  {% if value is none %}<span class="pill off">n/a</span>
+  {% elif value >= 90 %}<span class="pill ok">{{ value }}</span>
+  {% elif value >= 50 %}<span class="pill warn">{{ value }}</span>
+  {% else %}<span class="pill bad">{{ value }}</span>{% endif %}
+{% endmacro %}
+
+{% macro ms(value) %}{% if value is none %}—{% else %}{{ (value/1000)|round(2) }}s{% endif %}{% endmacro %}

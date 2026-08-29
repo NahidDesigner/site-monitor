@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% from "_macros.html" import banner, ago %}
+{% block title %}Reports · Site Monitor{% endblock %}
+{% block body %}
+{{ banner(request.query_params.get('message'), request.query_params.get('error')) }}
+<div class="head">
+  <div><h1>Reports</h1><p>Every Elementor CSS check, newest first</p></div>
+  <span class="spacer"></span>
+  <a class="btn btn-sm" href="/export/runs.csv">Download CSV</a>
+  <a class="btn btn-sm" href="/export/runs.xlsx">Download Excel</a>
+</div>
+
+{% if runs %}
+<div class="card" style="padding:0">
+  <div class="tablewrap"><table>
+    <tr><th>Started</th><th>Status</th><th class="num">Sites</th><th class="num">Pages</th>
+        <th class="num">Stylesheets</th><th class="num">Broken</th><th></th></tr>
+    {% for row in runs %}
+    <tr>
+      <td>{{ ago(row['started_at']) }}</td>
+      <td>{% if row['status']=='completed' %}<span class="pill ok">done</span>
+          {% elif row['status']=='running' %}<span class="pill warn">running</span>
+          {% else %}<span class="pill bad">{{ row['status'] }}</span>{% endif %}</td>
+      <td class="num">{{ row['sites_checked'] }}</td>
+      <td class="num">{{ '{:,}'.format(row['pages_checked']) }}</td>
+      <td class="num">{{ '{:,}'.format(row['assets_checked']) }}</td>
+      <td class="num">{% if row['broken_assets'] %}<strong style="color:var(--bad)">{{ row['broken_assets'] }}</strong>
+          {% else %}0{% endif %}</td>
+      <td style="text-align:right"><a class="btn btn-sm" href="/runs/{{ row['id'] }}">Open</a></td>
+    </tr>
+    {% endfor %}
+  </table></div>
+</div>
+{% else %}
+<div class="card empty"><p>No checks have run yet.</p></div>
+{% endif %}
+{% endblock %}

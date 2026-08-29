@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% from "_macros.html" import banner, ago, score, ms %}
+{% block title %}PageSpeed · Site Monitor{% endblock %}
+{% macro sortlink(key, label) %}
+  {% set flip = 'asc' if (sort == key and dir == 'desc') else 'desc' %}
+  <a href="?sort={{ key }}&dir={{ flip }}{% if domain %}&domain={{ domain }}{% endif %}{% if strategy %}&strategy={{ strategy }}{% endif %}{% if run_id %}&run_id={{ run_id }}{% endif %}"
+     style="color:inherit;text-decoration:none">{{ label }}{% if sort == key %} {{ '↑' if dir=='asc' else '↓' }}{% endif %}</a>
+{% endmacro %}
+{% block body %}
+{{ banner(message or request.query_params.get('message'), error or request.query_params.get('error')) }}
+
+<div class="head">
+  <div><h1>PageSpeed</h1><p>Lighthouse performance history, newest first</p></div>
+  <span class="spacer"></span>
+  <a class="btn btn-sm" href="/export/pagespeed.csv?sort={{ sort }}&dir={{ dir }}&domain={{ domain }}&strategy={{ strategy }}&run_id={{ run_id }}">Download CSV</a>
+  <a class="btn btn-sm" href="/export/pagespeed.xlsx?sort={{ sort }}&dir={{ dir }}&domain={{ domain }}&strategy={{ strategy }}&run_id={{ run_id }}">Download Excel</a>
+  <form method="post" action="/pagespeed/run" style="display:inline">
+    <button class="btn-primary" type="submit">Test now</button>
+  </form>
+</div>
+
+{% if not configured %}
+<div class="banner info">
+  No PageSpeed API key set. Tests still run without one but Google rate-limits
+  them heavily — add a key under <a href="/settings">Settings</a>.
+</div>
+{% endif %}
+
+<form method="get" class="card" style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
+  <div style="flex:1;min-width:170px">
+    <label for="f-domain">Site</label>
+    <select id="f-domain" name="domain">
+      <option value="">All sites</option>
+      {% for d in domains %}<option value="{{ d }}" {{ 'selected' if d==domain }}>{{ d }}</option>{% endfor %}
+    </select>
+  </div>
+  <div style="flex:1;min-width:140px">
+    <label for="f-strategy">Device</label>
+    <select id="f-strategy" name="strategy">
+      <option value="">Both</option>
+      <option value="mobile" {{ 'selected' if strategy=='mobile' }}>Mobile</option>
+      <option value="desktop" {{ 'selected' if strategy=='desktop' }}>Desktop</option>
+    </select>
+  </div>
+  <div style="flex:1;min-width:180px">
+    <label for="f-run">Test run</label>
+    <select id="f-run" name="run_id">
+      <option value="">All runs</option>
+      {% for r in runs %}
+        <option value="{{ r['id'] }}" {{ 'selected' if run_id == r['id']|string }}>
+          {{ r['started_at']|replace('T',' ')|replace('+00:00','') }} ({{ r['urls_tested'] }} tested)
+        </option>
+      {% endfor %}
+    </select>
+  </div>
+  <input type="hidden" name="sort" value="{{ sort }}"><input type="hidden" name="dir" value="{{ dir }}">
+  <button type="submit">Apply</button>
+  {% if domain or strategy or run_id %}<a class="btn" href="/pagespeed">Clear</a>{% endif %}
+</form>
+
+{% if results %}
+<div class="card" style="padding:0">
+  <div class="tablewrap"><table>
+    <tr>
+      <th>{{ sortlink('domain', 'Site') }}</th>
+      <th>{{ sortlink('url', 'URL') }}</th>
+      <th>Device</th>
+      <th class="num">{{ sortlink('performance', 'Performance') }}</th>
+      <th class="num">{{ sortlink('lcp', 'LCP') }}</th>
+      <th class="num">{{ sortlink('cls', 'CLS') }}</th>
+      <th class="num">{{ sortlink('tbt', 'TBT') }}</th>
+      <th>{{ sortlink('tested_at', 'Tested') }}</th>
+    </tr>
+    {% for row in results %}
+    <tr>
+      <td><strong>{{ row['domain'] }}</strong></td>
+      <td class="u" style="max-width:280px"><a href="{{ row['url'] }}" target="_blank" rel="noopener">{{ row['url'] }}</a></td>
+      <td>{{ row['strategy'] }}</td>
+      <td class="num">{{ score(row['performance']) }}</td>
+      <td class="num">{{ ms(row['lcp_ms']) }}</td>
+      <td class="num">{{ row['cls'] if row['cls'] is not none else '—' }}</td>
+      <td class="num">{{ ms(row['tbt_ms']) }}</td>
+      <td style="font-size:12px">{{ ago(row['tested_at']) }}</td>
+    </tr>
+    {% if row['error'] %}
+    <tr><td colspan="8" style="color:var(--bad);font-size:12.5px;padding-top:0">{{ row['error'] }}</td></tr>
+    {% endif %}
+    {% endfor %}
+  </table></div>
+</div>
+<p class="hint">{{ results|length }} result(s). Performance is the Lighthouse score out of 100;
+   LCP and TBT are in seconds.</p>
+{% else %}
+<div class="card empty">
+  <p>No PageSpeed results yet.</p>
+  <form method="post" action="/pagespeed/run"><button class="btn-primary" type="submit">Run the first test</button></form>
+</div>
+{% endif %}
+{% endblock %}

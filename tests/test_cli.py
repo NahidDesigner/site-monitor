@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import site_monitor.cli as cli
+import site_monitor.runner as runner
 from fixtures import BROKEN_CSS, PAGE_URL
 from site_monitor.crawler import RunResult, SiteResult
 from site_monitor.db import Database
@@ -76,13 +77,19 @@ def _healthy_run() -> RunResult:
 
 
 def _patch_run(monkeypatch, run: RunResult):
+    """Stub the crawl where the runner calls it, not where the CLI imports it.
+
+    cmd_check goes CLI -> runner.execute_run -> crawler.run_checks, so patching
+    the CLI's own name would leave the real crawler running.
+    """
+
     async def fake(settings, *, transport=None, on_site_complete=None):
         for site in run.sites:
             if on_site_complete is not None:
                 on_site_complete(site)
         return run
 
-    monkeypatch.setattr(cli, "run_checks", fake)
+    monkeypatch.setattr(runner, "run_checks", fake)
 
 
 def test_check_exits_zero_and_sends_nothing_when_healthy(

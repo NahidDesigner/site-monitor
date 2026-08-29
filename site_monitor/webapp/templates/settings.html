@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% from "_macros.html" import banner %}
+{% block title %}Settings · Site Monitor{% endblock %}
+{% block body %}
+{{ banner(message or request.query_params.get('message'), error or request.query_params.get('error')) }}
+
+<div class="head">
+  <div><h1>Settings</h1><p>Saved here, these override the server's environment variables — no redeploy needed</p></div>
+</div>
+
+<form method="post" action="/settings/save">
+<div class="card">
+  <h2>Telegram alerts</h2>
+  <p class="hint" style="margin:0 0 16px">
+    Alerts are sent only when something is broken. Create a bot with
+    <span class="mono">@BotFather</span>, then get your chat ID from
+    <span class="mono">@userinfobot</span> — or add the bot to a group and use the
+    group ID, which starts with <span class="mono">-100</span>.</p>
+  <div class="row">
+    <div class="field">
+      <label for="telegram_bot_token">Bot token</label>
+      <input id="telegram_bot_token" name="telegram_bot_token" type="text"
+             placeholder="{{ '•••••• (set in the environment)' if settings.telegram_bot_token and not stored.get('telegram_bot_token') else '123456:ABC-DEF...' }}"
+             value="{{ stored.get('telegram_bot_token','') }}">
+    </div>
+    <div class="field">
+      <label for="telegram_chat_id">Chat ID</label>
+      <input id="telegram_chat_id" name="telegram_chat_id" type="text"
+             placeholder="{{ '•••••• (set in the environment)' if settings.telegram_chat_id and not stored.get('telegram_chat_id') else '-1001234567890' }}"
+             value="{{ stored.get('telegram_chat_id','') }}">
+    </div>
+  </div>
+  <p class="hint" style="margin-top:-6px">
+    Status: {% if settings.telegram_enabled %}<strong style="color:var(--ok)">configured</strong>
+    {% else %}<strong style="color:var(--warn)">not configured — no alerts will be sent</strong>{% endif %}.
+    Leave a field empty to keep using the environment value.</p>
+</div>
+
+<div class="card">
+  <h2>PageSpeed Insights</h2>
+  <div class="row">
+    <div class="field">
+      <label for="pagespeed_api_key">API key</label>
+      <input id="pagespeed_api_key" name="pagespeed_api_key" type="text"
+             placeholder="{{ '•••••• (set in the environment)' if settings.pagespeed_api_key and not stored.get('pagespeed_api_key') else 'AIza...' }}"
+             value="{{ stored.get('pagespeed_api_key','') }}">
+      <p class="hint">Optional, but without one Google rate-limits tests hard.</p>
+    </div>
+    <div class="field">
+      <label for="pagespeed_strategies">Devices to test</label>
+      <select id="pagespeed_strategies" name="pagespeed_strategies">
+        <option value="mobile,desktop" {{ 'selected' if settings.pagespeed_strategies|length == 2 }}>Mobile and desktop</option>
+        <option value="mobile" {{ 'selected' if settings.pagespeed_strategies == ('mobile',) }}>Mobile only</option>
+        <option value="desktop" {{ 'selected' if settings.pagespeed_strategies == ('desktop',) }}>Desktop only</option>
+      </select>
+      <p class="hint">Each device doubles the number of API calls.</p>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Crawl limits</h2>
+  <p class="hint" style="margin:0 0 16px">
+    A full check makes roughly 15 requests per page. Lower these if a host starts
+    returning 429s; raise them if runs take too long.</p>
+  <div class="row">
+    <div class="field">
+      <label for="site_concurrency">Sites at once</label>
+      <input id="site_concurrency" name="site_concurrency" type="number" min="1"
+             placeholder="{{ settings.site_concurrency }}" value="{{ stored.get('site_concurrency','') }}">
+    </div>
+    <div class="field">
+      <label for="page_concurrency">Pages at once</label>
+      <input id="page_concurrency" name="page_concurrency" type="number" min="1"
+             placeholder="{{ settings.page_concurrency }}" value="{{ stored.get('page_concurrency','') }}">
+    </div>
+    <div class="field">
+      <label for="asset_concurrency">Stylesheets at once</label>
+      <input id="asset_concurrency" name="asset_concurrency" type="number" min="1"
+             placeholder="{{ settings.asset_concurrency }}" value="{{ stored.get('asset_concurrency','') }}">
+    </div>
+  </div>
+  <div class="row">
+    <div class="field">
+      <label for="request_timeout">Timeout (seconds)</label>
+      <input id="request_timeout" name="request_timeout" type="text"
+             placeholder="{{ settings.request_timeout }}" value="{{ stored.get('request_timeout','') }}">
+    </div>
+    <div class="field">
+      <label for="max_retries">Retries per request</label>
+      <input id="max_retries" name="max_retries" type="number" min="1"
+             placeholder="{{ settings.max_retries }}" value="{{ stored.get('max_retries','') }}">
+    </div>
+    <div class="field">
+      <label for="max_pages_per_site">Max pages per site</label>
+      <input id="max_pages_per_site" name="max_pages_per_site" type="number" min="0"
+             placeholder="{{ settings.max_pages_per_site }}" value="{{ stored.get('max_pages_per_site','') }}">
+      <p class="hint">0 means no limit.</p>
+    </div>
+  </div>
+  <div class="field">
+    <label for="user_agent">User agent</label>
+    <input id="user_agent" name="user_agent" type="text"
+           placeholder="{{ settings.user_agent }}" value="{{ stored.get('user_agent','') }}">
+    <p class="hint">Some hosts vary their HTML by user agent, so this should look like a real browser.</p>
+  </div>
+</div>
+
+<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px">
+  <button class="btn-primary" type="submit">Save settings</button>
+</div>
+</form>
+
+<div class="card">
+  <h2>Check it works</h2>
+  <p class="hint" style="margin:0 0 14px">
+    Sends a real message to the configured chat. Worth doing once — a monitor
+    whose alerts do not arrive reads as good news.</p>
+  <form method="post" action="/settings/test-telegram">
+    <button type="submit">Send a test message</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>System</h2>
+  <div class="tablewrap"><table>
+    <tr><th>Setting</th><th>Value</th><th>Where from</th></tr>
+    <tr><td>Sites configured</td><td class="mono">{{ configured }}</td><td>database</td></tr>
+    <tr><td>Database</td><td class="mono">{{ settings.database_path }}</td><td>environment</td></tr>
+    <tr><td>Timezone</td><td class="mono">{{ settings.timezone }}</td><td>environment</td></tr>
+    <tr><td>Log level</td><td class="mono">{{ settings.log_level }}</td><td>environment</td></tr>
+  </table></div>
+  <p class="hint">Database path, timezone and the dashboard password are environment-only —
+     changing them from a web form would let a stolen session repoint the app.</p>
+</div>
+{% endblock %}

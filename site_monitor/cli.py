@@ -23,6 +23,7 @@ from .discovery import (
 from .elementor import check_page
 from .http import Fetcher, build_client
 from .notifier import TelegramNotifier, format_alert
+from .runner import deliver_alert, execute_run, resolve_sites
 
 log = logging.getLogger("site_monitor")
 
@@ -69,36 +70,16 @@ def print_summary(run: RunResult) -> None:
 async def cmd_check(settings: Settings, args: argparse.Namespace) -> int:
     """Full run: crawl every site, persist, alert if anything is broken."""
     with Database(settings.database_path) as database:
-        run_id = database.start_run()
-        log.info("run %s started (%s sites)", run_id, len(settings.sites))
-
-        try:
-            run = await run_checks(
-                settings,
-                on_site_complete=lambda result: database.record_site_result(
-                    run_id, result
-                ),
+        sites = resolve_sites(settings, database)
+        if not sites:
+            log.error(
+                "no sites configured -- add them in the dashboard, or run "
+                "'site-monitor sites import <file.yaml>'"
             )
-        except Exception as exc:
-            database.finish_run(
-                run_id,
-                status="failed",
-                sites_checked=0,
-                pages_checked=0,
-                assets_checked=0,
-                broken_assets=0,
-                error=f"{type(exc).__name__}: {exc}",
-            )
-            raise
+            return EXIT_ERROR
 
-        database.finish_run(
-            run_id,
-            status="completed",
-            sites_checked=len(run.sites),
-            pages_checked=run.pages_checked,
-            assets_checked=run.assets_checked,
-            broken_assets=run.broken_asset_count,
-        )
+        log.info("checking %s sites", len(sites))
+        run, _ = await execute_run(settings, database, sites)
 
     print_summary(run)
 
@@ -120,13 +101,7 @@ async def cmd_check(settings: Settings, args: argparse.Namespace) -> int:
         )
         return EXIT_BROKEN
 
-    notifier = TelegramNotifier(
-        settings.telegram_bot_token,
-        settings.telegram_chat_id,
-        timeout=settings.request_timeout,
-        max_retries=settings.max_retries,
-    )
-    sent = await notifier.send(messages)
+    sent = await deliver_alert(settings, run)
     log.info("sent %s/%s telegram message(s)", sent, len(messages))
     return EXIT_BROKEN
 
@@ -162,9 +137,11 @@ async def cmd_check_url(settings: Settings, args: argparse.Namespace) -> int:
 
 async def cmd_check_site(settings: Settings, args: argparse.Namespace) -> int:
     """Check one configured site by domain, without touching the others."""
-    matches = [site for site in settings.sites if site.domain == args.domain]
+    with Database(settings.database_path) as database:
+        configured = resolve_sites(settings, database)
+    matches = [site for site in configured if site.domain == args.domain]
     if not matches:
-        known = ", ".join(site.domain for site in settings.sites) or "(none)"
+        known = ", ".join(site.domain for site in configured) or "(none)"
         print(f"unknown site {args.domain!r}; configured sites: {known}", file=sys.stderr)
         return EXIT_ERROR
 
@@ -288,12 +265,13 @@ async def cmd_validate(settings: Settings, args: argparse.Namespace) -> int:
     Confirms every sitemap resolves, reports how many pages each will crawl,
     and samples one page per site to confirm Elementor stylesheets are found.
     """
-    sites = [site for site in settings.sites if site.enabled]
+    with Database(settings.database_path) as database:
+        sites = resolve_sites(settings, database)
     if not sites:
-        print("no enabled sites in the site list", file=sys.stderr)
+        print("no enabled sites configured", file=sys.stderr)
         return EXIT_ERROR
 
-    print(f"Validating {len(sites)} site(s) from {settings.sites_file}\n")
+    print(f"Validating {len(sites)} site(s)\n")
 
     semaphore = asyncio.Semaphore(settings.site_concurrency)
     client, fetcher = await _with_fetcher(settings)
@@ -344,6 +322,69 @@ async def cmd_validate(settings: Settings, args: argparse.Namespace) -> int:
         )
     return EXIT_BROKEN if failed else EXIT_OK
 
+
+async def cmd_sites(settings: Settings, args: argparse.Namespace) -> int:
+    """List, import or remove sites in the database."""
+    from .config import load_sites
+
+    with Database(settings.database_path) as database:
+        if args.sites_action == "import":
+            source = Path(args.file)
+            if not source.is_file():
+                print(f"no such file: {source}", file=sys.stderr)
+                return EXIT_ERROR
+            imported = database.import_sites(
+                list(load_sites(source)), replace=args.replace
+            )
+            total = database.site_count()
+            print(f"imported {imported} site(s); {total} now configured")
+            return EXIT_OK
+
+        if args.sites_action == "remove":
+            if database.delete_site(args.domain):
+                print(f"removed {args.domain}")
+                return EXIT_OK
+            print(f"no such site: {args.domain}", file=sys.stderr)
+            return EXIT_ERROR
+
+        sites = database.list_sites()
+        if not sites:
+            print("no sites configured")
+            return EXIT_OK
+        print(f"{'domain':<36} {'pages':>6}  source")
+        for site in sites:
+            source = site.sitemap or "curated list"
+            flag = "" if site.enabled else "  (disabled)"
+            count = len(site.pages) if site.has_explicit_pages else 0
+            print(f"{site.domain:<36} {count:>6}  {source}{flag}")
+        print(f"\n{len(sites)} site(s)")
+    return EXIT_OK
+
+
+async def cmd_serve(settings: Settings, args: argparse.Namespace) -> int:
+    """Run the dashboard."""
+    import uvicorn
+
+    from .webapp import create_app
+
+    if not settings.dashboard_password:
+        log.error(
+            "DASHBOARD_PASSWORD is not set -- refusing to serve an unprotected "
+            "dashboard that can edit the site list and trigger runs"
+        )
+        return EXIT_ERROR
+
+    config = uvicorn.Config(
+        create_app(settings),
+        host=args.host,
+        port=args.port,
+        log_level=settings.log_level.lower(),
+        access_log=False,
+    )
+    await uvicorn.Server(config).serve()
+    return EXIT_OK
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="site-monitor",
@@ -391,6 +432,23 @@ def build_parser() -> argparse.ArgumentParser:
     )
     validate.add_argument("--no-sample", action="store_true")
     validate.set_defaults(handler=cmd_validate)
+
+    sites_cmd = sub.add_parser("sites", help="manage the configured site list")
+    sites_sub = sites_cmd.add_subparsers(dest="sites_action")
+    sites_sub.add_parser("list", help="list configured sites")
+    imp = sites_sub.add_parser("import", help="import sites from a YAML file")
+    imp.add_argument("file")
+    imp.add_argument(
+        "--replace", action="store_true", help="delete existing sites first"
+    )
+    rm = sites_sub.add_parser("remove", help="remove one site")
+    rm.add_argument("domain")
+    sites_cmd.set_defaults(handler=cmd_sites, sites_action="list")
+
+    serve = sub.add_parser("serve", help="run the web dashboard")
+    serve.add_argument("--host", default="0.0.0.0")
+    serve.add_argument("--port", type=int, default=8080)
+    serve.set_defaults(handler=cmd_serve)
 
     history = sub.add_parser("history", help="list recent runs")
     history.add_argument("--limit", type=int, default=10)

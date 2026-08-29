@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% from "_macros.html" import banner, ago %}
+{% block title %}{{ site.domain if site else 'New site' }} · Site Monitor{% endblock %}
+{% block body %}
+{{ banner(None, error) }}
+
+<div class="head">
+  <div>
+    <h1>{{ site.domain if site else 'Add a site' }}</h1>
+    <p>{% if site %}Edit which pages get checked{% else %}Give it a domain and the pages to watch{% endif %}</p>
+  </div>
+  <span class="spacer"></span>
+  <a class="btn" href="/sites">Back to sites</a>
+</div>
+
+<form method="post" action="/sites/save">
+<input type="hidden" name="original" value="{{ site.domain if site else '' }}">
+<div class="row" style="align-items:flex-start">
+  <div class="card" style="flex:2;min-width:340px">
+    <div class="field">
+      <label for="domain">Domain</label>
+      <input id="domain" name="domain" type="text" required placeholder="dvlfirm.com"
+             value="{{ site.domain if site else '' }}">
+      <p class="hint">Used to group alerts. Paste a full URL if it is easier — it will be trimmed.</p>
+    </div>
+
+    <div class="field">
+      <label for="pages">Pages to check</label>
+      <textarea id="pages" name="pages" placeholder="https://dvlfirm.com/&#10;https://dvlfirm.com/about/">{{ pages|join('\n') }}</textarea>
+      <p class="hint">One URL per line. Duplicates are removed automatically.
+         Leave empty to crawl the sitemap instead.</p>
+    </div>
+
+    <div class="field">
+      <label for="sitemap">Sitemap URL (optional)</label>
+      <input id="sitemap" name="sitemap" type="text" placeholder="https://dvlfirm.com/sitemap_index.xml"
+             value="{{ site.sitemap if site else '' }}">
+      <p class="hint">Only used when no pages are listed above. Sitemap indexes are followed automatically.</p>
+    </div>
+
+    <div class="row">
+      <div class="field">
+        <label for="max_pages">Max pages (optional)</label>
+        <input id="max_pages" name="max_pages" type="number" min="1"
+               value="{{ site.max_pages if site and site.max_pages else '' }}">
+        <p class="hint">Caps a large sitemap. Leave empty for no limit.</p>
+      </div>
+      <div class="field" style="padding-top:26px">
+        <label class="check">
+          <input type="checkbox" name="enabled" value="1"
+                 {% if not site or site.enabled %}checked{% endif %}>
+          Include in scheduled checks
+        </label>
+      </div>
+    </div>
+
+    <button class="btn-primary" type="submit">{{ 'Save changes' if site else 'Add site' }}</button>
+  </div>
+
+  <div class="card" style="flex:1;min-width:260px">
+    <h2>Breakage history</h2>
+    {% if history %}
+      <div class="tablewrap"><table>
+        <tr><th>When</th><th>Stylesheet</th></tr>
+        {% for row in history %}
+        <tr>
+          <td style="font-size:12px">{{ ago(row['detected_at']) }}</td>
+          <td class="u" title="{{ row['reason'] }}">{{ row['asset_url'].split('/')|last }}</td>
+        </tr>
+        {% endfor %}
+      </table></div>
+    {% else %}
+      <p style="color:var(--ink-faint);font-size:13.5px;margin:0">
+        {% if site %}Nothing has broken on this site yet.{% else %}History appears once this site has been checked.{% endif %}</p>
+    {% endif %}
+  </div>
+</div>
+</form>
+{% endblock %}

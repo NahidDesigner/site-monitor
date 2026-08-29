@@ -1,0 +1,153 @@
+{% extends "base.html" %}
+{% from "_macros.html" import banner, ago, score %}
+{% block title %}Overview · Site Monitor{% endblock %}
+{% block body %}
+{{ banner(request.query_params.get('message'), request.query_params.get('error')) }}
+
+<div class="head">
+  <div>
+    <h1>Overview</h1>
+    <p>{{ enabled|length }} active {{ 'site' if enabled|length == 1 else 'sites' }} ·
+       {{ '{:,}'.format(total_pages) }} pages watched</p>
+  </div>
+</div>
+
+{% if not sites %}
+  <div class="card empty">
+    <p>No sites yet. Add one, or paste in a whole list.</p>
+    <a class="btn btn-primary" href="/sites/new">Add a site</a>
+    <a class="btn" href="/import">Import a list</a>
+  </div>
+{% else %}
+
+<div class="tiles">
+  <div class="tile">
+    <div class="k">Last check</div>
+    <div class="v">{% if latest %}{{ latest['broken_assets'] }}{% else %}—{% endif %}</div>
+    <div class="s">{% if latest %}broken stylesheets{% else %}never run{% endif %}</div>
+  </div>
+  <div class="tile">
+    <div class="k">Pages checked</div>
+    <div class="v">{{ '{:,}'.format(latest['pages_checked']) if latest else '—' }}</div>
+    <div class="s">{{ '{:,}'.format(latest['assets_checked']) if latest else '' }}{% if latest %} stylesheets{% endif %}</div>
+  </div>
+  <div class="tile {{ 'bad' if grouped else 'ok' }}">
+    <div class="k">Sites affected</div>
+    <div class="v">{{ grouped|length }}</div>
+    <div class="s">{{ 'needs attention' if grouped else 'all clear' }}</div>
+  </div>
+  <div class="tile">
+    <div class="k">Last run at</div>
+    <div class="v" style="font-size:1rem;padding-top:8px">{{ ago(latest['started_at']) if latest else '—' }}</div>
+    <div class="s">{{ latest['status'] if latest else '' }}</div>
+  </div>
+</div>
+
+{% if grouped %}
+<div class="card">
+  <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px">
+    <h2 style="margin:0">Broken right now</h2>
+    <span class="spacer"></span>
+    <a class="btn btn-sm" href="/export/broken.csv">Download CSV</a>
+    <a class="btn btn-sm" href="/export/broken.xlsx">Download Excel</a>
+  </div>
+  {% for domain, rows in grouped.items() %}
+    <div class="finding">
+      <h3>{{ domain }} <span class="pill bad">{{ rows|length }} broken</span></h3>
+      {% set pages = {} %}
+      {% for row in rows %}{% if pages.update({row['page_url']: pages.get(row['page_url'], []) + [row]}) %}{% endif %}{% endfor %}
+      {% for page_url, items in pages.items() %}
+        <p class="pg"><a href="{{ page_url }}" target="_blank" rel="noopener">{{ page_url }}</a></p>
+        {% for item in items %}
+          <p class="as">{{ item['asset_url'].split('/')|last }}
+             <span class="why">— {{ item['reason'] }}</span></p>
+        {% endfor %}
+      {% endfor %}
+    </div>
+  {% endfor %}
+</div>
+{% elif latest %}
+<div class="card">
+  <h2>Broken right now</h2>
+  <p style="color:var(--ok);font-size:14px;margin:0">
+    Every Elementor stylesheet resolved correctly on the last run.</p>
+</div>
+{% endif %}
+
+{% if errors %}
+<div class="card">
+  <h2>Pages that could not be reached</h2>
+  <div class="tablewrap"><table>
+    <tr><th>Site</th><th>Page</th><th>Problem</th></tr>
+    {% for row in errors %}
+    <tr><td>{{ row['domain'] }}</td><td class="u">{{ row['page_url'] }}</td><td>{{ row['error'] }}</td></tr>
+    {% endfor %}
+  </table></div>
+</div>
+{% endif %}
+
+<div class="row" style="align-items:flex-start">
+  <div class="card" style="flex:1.2">
+    <div style="display:flex;align-items:center;margin-bottom:12px">
+      <h2 style="margin:0">Recent checks</h2><span class="spacer"></span>
+      <a class="btn btn-sm" href="/runs">All reports</a>
+    </div>
+    {% if recent %}
+    <div class="tablewrap"><table>
+      <tr><th>When</th><th>Status</th><th class="num">Pages</th><th class="num">Broken</th></tr>
+      {% for row in recent %}
+      <tr>
+        <td><a href="/runs/{{ row['id'] }}">{{ ago(row['started_at']) }}</a></td>
+        <td>{% if row['status']=='completed' %}<span class="pill ok">done</span>
+            {% elif row['status']=='running' %}<span class="pill warn">running</span>
+            {% else %}<span class="pill bad">{{ row['status'] }}</span>{% endif %}</td>
+        <td class="num">{{ '{:,}'.format(row['pages_checked']) }}</td>
+        <td class="num">{{ row['broken_assets'] }}</td>
+      </tr>
+      {% endfor %}
+    </table></div>
+    {% else %}<p style="color:var(--ink-faint);font-size:13.5px;margin:0">No checks yet.</p>{% endif %}
+  </div>
+
+  <div class="card" style="flex:1">
+    <div style="display:flex;align-items:center;margin-bottom:12px">
+      <h2 style="margin:0">Schedules</h2><span class="spacer"></span>
+      <a class="btn btn-sm" href="/schedules">Manage</a>
+    </div>
+    {% if schedules %}
+    <div class="tablewrap"><table>
+      <tr><th>Name</th><th>Next run</th></tr>
+      {% for row in schedules %}
+      <tr>
+        <td>{{ row['name'] }}
+          {% if not row['enabled'] %}<span class="pill off">paused</span>{% endif %}</td>
+        <td>{{ ago(row['next_run_at']) }}</td>
+      </tr>
+      {% endfor %}
+    </table></div>
+    {% else %}
+      <p style="color:var(--ink-faint);font-size:13.5px;margin:0 0 12px">
+        Nothing scheduled — checks only run when you press the button.</p>
+      <a class="btn btn-sm btn-primary" href="/schedules">Add a schedule</a>
+    {% endif %}
+  </div>
+</div>
+
+{% if ps_results %}
+<div class="card">
+  <div style="display:flex;align-items:center;margin-bottom:12px">
+    <h2 style="margin:0">Slowest pages</h2><span class="spacer"></span>
+    <a class="btn btn-sm" href="/pagespeed">All PageSpeed reports</a>
+  </div>
+  <div class="tablewrap"><table>
+    <tr><th>Site</th><th>Device</th><th class="num">Performance</th></tr>
+    {% for row in ps_results %}
+    <tr><td>{{ row['domain'] }}</td><td>{{ row['strategy'] }}</td>
+        <td class="num">{{ score(row['performance']) }}</td></tr>
+    {% endfor %}
+  </table></div>
+</div>
+{% endif %}
+
+{% endif %}
+{% endblock %}
