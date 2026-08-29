@@ -7,9 +7,18 @@ import asyncio
 import logging
 import sys
 
-from .config import ConfigError, Settings, load_sites
+from pathlib import Path
+
+from .config import ConfigError, Settings
 from .crawler import RunResult, check_site, run_checks
 from .db import Database
+from .discovery import (
+    SiteProbe,
+    discover_many,
+    probe_sitemap,
+    read_domains,
+    render_sites_yaml,
+)
 from .elementor import check_page
 from .http import Fetcher, build_client
 from .notifier import TelegramNotifier, format_alert
@@ -191,6 +200,139 @@ async def cmd_history(settings: Settings, args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+
+def _probe_line(probe: SiteProbe) -> str:
+    """One aligned status line per site."""
+    if not probe.ok:
+        return f"  ✗ {probe.domain:<32} {probe.error}"
+    elementor = {
+        True: f"{probe.sample_css_count} Elementor CSS on sample",
+        False: "no Elementor CSS on sample",
+        None: "sample not fetched",
+    }[probe.uses_elementor]
+    return (
+        f"  ✓ {probe.domain:<32} {probe.pages_found:>5} pages  "
+        f"[{probe.source}]  {elementor}"
+    )
+
+
+async def _with_fetcher(settings: Settings):
+    client = build_client(
+        user_agent=settings.user_agent,
+        timeout=settings.request_timeout,
+        max_connections=max(settings.page_concurrency, settings.asset_concurrency),
+    )
+    return client, Fetcher(
+        client, max_retries=settings.max_retries, backoff=settings.retry_backoff
+    )
+
+
+async def cmd_discover(settings: Settings, args: argparse.Namespace) -> int:
+    """Resolve each domain's sitemap and emit a ready-to-use sites.yaml.
+
+    robots.txt is consulted first, then the usual SEO-plugin paths.
+    """
+    if args.from_file:
+        domains = read_domains(Path(args.from_file).read_text(encoding="utf-8"))
+    elif args.domains:
+        domains = read_domains(" ".join(args.domains))
+    else:
+        domains = read_domains(sys.stdin.read())
+
+    if not domains:
+        print("no domains given", file=sys.stderr)
+        return EXIT_ERROR
+
+    print(f"Resolving sitemaps for {len(domains)} domain(s)...\n", file=sys.stderr)
+    client, fetcher = await _with_fetcher(settings)
+    async with client:
+        probes = await discover_many(
+            fetcher,
+            domains,
+            concurrency=settings.site_concurrency,
+            sample_pages=0 if args.no_sample else 1,
+        )
+
+    for probe in probes:
+        print(_probe_line(probe), file=sys.stderr)
+
+    resolved = [probe for probe in probes if probe.ok]
+    no_elementor = [probe for probe in resolved if probe.uses_elementor is False]
+    print(
+        f"\n{len(resolved)}/{len(probes)} resolved"
+        + (f", {len(no_elementor)} with no Elementor CSS on the sampled page" if no_elementor else ""),
+        file=sys.stderr,
+    )
+
+    body = render_sites_yaml(probes)
+    if args.output:
+        target = Path(args.output)
+        if target.exists() and not args.force:
+            print(
+                f"\n{target} already exists; pass --force to overwrite",
+                file=sys.stderr,
+            )
+            return EXIT_ERROR
+        target.write_text(body, encoding="utf-8")
+        print(f"\nwrote {target}", file=sys.stderr)
+    else:
+        print(body, end="")
+
+    return EXIT_OK if len(resolved) == len(probes) else EXIT_BROKEN
+
+
+async def cmd_validate(settings: Settings, args: argparse.Namespace) -> int:
+    """Pre-flight the configured sites without running a full check.
+
+    Confirms every sitemap resolves, reports how many pages each will crawl,
+    and samples one page per site to confirm Elementor stylesheets are found.
+    """
+    sites = [site for site in settings.sites if site.enabled]
+    if not sites:
+        print("no enabled sites in the site list", file=sys.stderr)
+        return EXIT_ERROR
+
+    print(f"Validating {len(sites)} site(s) from {settings.sites_file}\n")
+
+    semaphore = asyncio.Semaphore(settings.site_concurrency)
+    client, fetcher = await _with_fetcher(settings)
+
+    async def probe(site) -> SiteProbe:
+        async with semaphore:
+            result = SiteProbe(
+                domain=site.domain, sitemap=site.sitemap, source="configured"
+            )
+            try:
+                count, sample, css_count = await probe_sitemap(
+                    fetcher, site.sitemap, sample_pages=0 if args.no_sample else 1
+                )
+            except Exception as exc:
+                result.error = f"{type(exc).__name__}: {exc}"
+                return result
+            result.pages_found = count
+            result.sample_url = sample
+            result.sample_css_count = css_count
+            if count == 0:
+                result.error = "sitemap listed no pages"
+            return result
+
+    async with client:
+        probes = list(await asyncio.gather(*(probe(site) for site in sites)))
+
+    for result in probes:
+        print(_probe_line(result))
+
+    failed = [result for result in probes if not result.ok]
+    total_pages = sum(result.pages_found for result in probes)
+    print(f"\n{len(probes) - len(failed)}/{len(probes)} sites OK, {total_pages} pages per run")
+
+    if total_pages > 5000:
+        print(
+            f"  note: {total_pages} pages per run is a lot -- consider max_pages "
+            "per site, or a less frequent cron"
+        )
+    return EXIT_BROKEN if failed else EXIT_OK
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="site-monitor",
@@ -218,6 +360,27 @@ def build_parser() -> argparse.ArgumentParser:
     check_site_cmd.add_argument("domain")
     check_site_cmd.set_defaults(handler=cmd_check_site)
 
+    discover = sub.add_parser(
+        "discover",
+        help="resolve sitemaps for a list of domains and emit sites.yaml",
+    )
+    discover.add_argument("domains", nargs="*", help="domains; omit to read stdin")
+    discover.add_argument("--from-file", help="read domains from a file, one per line")
+    discover.add_argument("-o", "--output", help="write sites.yaml here instead of stdout")
+    discover.add_argument("--force", action="store_true", help="overwrite --output")
+    discover.add_argument(
+        "--no-sample",
+        action="store_true",
+        help="skip the per-site Elementor sample fetch (faster)",
+    )
+    discover.set_defaults(handler=cmd_discover)
+
+    validate = sub.add_parser(
+        "validate", help="pre-flight the configured sites without a full check"
+    )
+    validate.add_argument("--no-sample", action="store_true")
+    validate.set_defaults(handler=cmd_validate)
+
     history = sub.add_parser("history", help="list recent runs")
     history.add_argument("--limit", type=int, default=10)
     history.set_defaults(handler=cmd_history)
@@ -237,7 +400,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             settings = Settings.from_env(args.env_file)
         except ConfigError:
-            if args.handler is not cmd_check_url:
+            if args.handler not in (cmd_check_url, cmd_discover):
                 raise
             settings = Settings()
     except ConfigError as exc:
