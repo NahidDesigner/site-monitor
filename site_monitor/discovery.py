@@ -45,7 +45,9 @@ class SiteProbe:
 
     @property
     def ok(self) -> bool:
-        return self.error is None and bool(self.sitemap) and self.pages_found > 0
+        """Usable means "we know which pages to check" -- a sitemap is one way
+        to learn that, an explicit page list is another."""
+        return self.error is None and self.pages_found > 0
 
     @property
     def uses_elementor(self) -> bool | None:
@@ -84,6 +86,30 @@ async def sitemaps_from_robots(fetcher: Fetcher, domain: str) -> list[str]:
     return found
 
 
+async def sample_page(
+    fetcher: Fetcher, pages: "list[str] | tuple[str, ...]"
+) -> tuple[str | None, int | None]:
+    """Fetch one representative page and count its Elementor stylesheets.
+
+    Samples from the middle: a WordPress homepage is often the least
+    representative page on the site, and trailing sitemap entries are often
+    thin archives. Returns (sampled URL, stylesheet count); the count is None
+    when the page could not be read.
+    """
+    if not pages:
+        return None, None
+
+    sample = pages[len(pages) // 2]
+    try:
+        response = await fetcher.get(sample)
+    except FetchError:
+        return sample, None
+    if response.status_code != 200:
+        return sample, None
+
+    return sample, len(extract_elementor_css_urls(response.text, str(response.url)))
+
+
 async def probe_sitemap(
     fetcher: Fetcher,
     sitemap_url: str,
@@ -98,18 +124,8 @@ async def probe_sitemap(
     if not pages or sample_pages <= 0:
         return len(pages), None, None
 
-    # Sample from the middle: the homepage is often the least representative
-    # page on a WordPress site, and the last entries are often thin archives.
-    sample = pages[len(pages) // 2]
-    try:
-        response = await fetcher.get(sample)
-    except FetchError:
-        return len(pages), sample, None
-    if response.status_code != 200:
-        return len(pages), sample, None
-
-    css = extract_elementor_css_urls(response.text, str(response.url))
-    return len(pages), sample, len(css)
+    sample, css_count = await sample_page(fetcher, pages)
+    return len(pages), sample, css_count
 
 
 async def discover_site(

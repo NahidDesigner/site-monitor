@@ -50,7 +50,12 @@ def test_top_level_list_is_also_accepted(tmp_path):
     [
         ("sites: []", "no sites defined"),
         ("sites:\n  - sitemap: https://a.com/s.xml", "missing 'domain'"),
-        ("sites:\n  - domain: a.com", "missing 'sitemap'"),
+        ("sites:\n  - domain: a.com", "needs either 'sitemap' or 'pages'"),
+        (
+            "sites:\n  - domain: a.com\n    pages:\n      - /relative/",
+            "page must be an absolute URL",
+        ),
+        ("sites:\n  - domain: a.com\n    pages: nope", "pages must be a list"),
         ("sites:\n  - domain: a.com\n    sitemap: /s.xml", "absolute URL"),
         (
             "sites:\n  - domain: a.com\n    sitemap: https://a.com/s.xml\n"
@@ -110,3 +115,41 @@ def test_non_numeric_env_value_is_rejected(tmp_path, monkeypatch):
 
 def test_telegram_disabled_when_credentials_missing():
     assert Settings().telegram_enabled is False
+
+
+def test_explicit_pages_are_loaded_and_deduplicated(tmp_path):
+    path = write(
+        tmp_path,
+        """
+sites:
+  - domain: dvlfirm.com
+    pages:
+      - https://dvlfirm.com/
+      - https://dvlfirm.com/about/
+      - https://dvlfirm.com/
+""",
+    )
+
+    site = load_sites(path)[0]
+
+    assert site.has_explicit_pages
+    assert site.pages == ("https://dvlfirm.com/", "https://dvlfirm.com/about/")
+    assert site.sitemap == ""
+
+
+def test_sitemap_and_pages_can_coexist(tmp_path):
+    path = write(
+        tmp_path,
+        """
+sites:
+  - domain: a.com
+    sitemap: https://a.com/sitemap.xml
+    pages:
+      - https://a.com/one/
+""",
+    )
+
+    site = load_sites(path)[0]
+
+    assert site.sitemap == "https://a.com/sitemap.xml"
+    assert site.has_explicit_pages

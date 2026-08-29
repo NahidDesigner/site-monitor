@@ -48,16 +48,28 @@ def _env_bool(name: str, default: bool) -> bool:
 
 @dataclass(frozen=True)
 class Site:
-    """A single monitored WordPress site."""
+    """A single monitored WordPress site.
+
+    Pages come from one of two sources: an explicit `pages` list, or a
+    `sitemap` to walk. An explicit list is exact and cheap; a sitemap is
+    broader but crawls whatever the SEO plugin happens to publish. When both
+    are given the explicit list wins -- it is the more specific instruction --
+    and the sitemap is kept only as documentation.
+    """
 
     domain: str
-    sitemap: str
+    sitemap: str = ""
+    pages: tuple[str, ...] = ()
     enabled: bool = True
     max_pages: int | None = None
 
     @property
     def key(self) -> str:
         return self.domain
+
+    @property
+    def has_explicit_pages(self) -> bool:
+        return bool(self.pages)
 
 
 @dataclass(frozen=True)
@@ -145,9 +157,28 @@ def load_sites(path: str | os.PathLike[str]) -> tuple[Site, ...]:
         sitemap = str(entry.get("sitemap") or "").strip()
         if not domain:
             raise ConfigError(f"{path}: site #{index + 1} is missing 'domain'")
-        if not sitemap:
-            raise ConfigError(f"{path}: site '{domain}' is missing 'sitemap'")
-        if not sitemap.startswith(("http://", "https://")):
+
+        raw_pages = entry.get("pages") or []
+        if not isinstance(raw_pages, list):
+            raise ConfigError(f"{path}: site '{domain}' pages must be a list")
+
+        pages: list[str] = []
+        for page in raw_pages:
+            url = str(page or "").strip()
+            if not url:
+                continue
+            if not url.startswith(("http://", "https://")):
+                raise ConfigError(
+                    f"{path}: site '{domain}' page must be an absolute URL: {url!r}"
+                )
+            if url not in pages:  # a curated list often repeats entries
+                pages.append(url)
+
+        if not sitemap and not pages:
+            raise ConfigError(
+                f"{path}: site '{domain}' needs either 'sitemap' or 'pages'"
+            )
+        if sitemap and not sitemap.startswith(("http://", "https://")):
             raise ConfigError(
                 f"{path}: site '{domain}' sitemap must be an absolute URL"
             )
@@ -160,6 +191,7 @@ def load_sites(path: str | os.PathLike[str]) -> tuple[Site, ...]:
             Site(
                 domain=domain,
                 sitemap=sitemap,
+                pages=tuple(pages),
                 enabled=bool(entry.get("enabled", True)),
                 max_pages=int(max_pages) if max_pages else None,
             )

@@ -230,3 +230,15 @@ async def test_robots_parsing_ignores_relative_and_malformed_entries():
         found = await sitemaps_from_robots(fetcher, "a.com")
 
     assert found == ["https://a.com/ok.xml"]
+
+
+def test_probe_is_ok_without_a_sitemap_when_pages_are_known():
+    """A site configured with an explicit page list has no sitemap to report."""
+    probe = SiteProbe(domain="a.com", source="pages", pages_found=24)
+
+    assert probe.ok
+
+
+def test_probe_is_not_ok_when_no_pages_were_found():
+    assert not SiteProbe(domain="a.com", sitemap="https://a.com/s.xml").ok
+    assert not SiteProbe(domain="a.com", error="boom", pages_found=3).ok

@@ -73,20 +73,54 @@ python -m site_monitor check --no-alert
 
 ### `sites.yaml`
 
+Pages come from one of two sources per site.
+
+**A curated list** — exact, cheap, and what you want when you already know which
+pages matter:
+
 ```yaml
 sites:
   - domain: dvlfirm.com
-    sitemap: https://dvlfirm.com/sitemap_index.xml
+    pages:
+      - https://dvlfirm.com/
+      - https://dvlfirm.com/business-law/trust-restatement/
+```
 
+**A sitemap** — broader, catches pages nobody curated, but crawls whatever the
+SEO plugin publishes:
+
+```yaml
+sites:
   - domain: example.com
     sitemap: https://example.com/wp-sitemap.xml
     max_pages: 200   # optional per-site cap
     enabled: true    # optional; false skips the site
 ```
 
+Duplicate URLs in a curated list are dropped at load. If a site gives both,
+`pages` wins — the explicit instruction is the more specific one — and the
+sitemap is kept only as documentation.
+
 Sitemap **indexes** are followed automatically (nested up to 4 levels), and
-`.xml.gz` sitemaps are decompressed. Yoast, Rank Math and WP core sitemaps all
-work as-is.
+`.xml.gz` sitemaps are decompressed. Yoast, Rank Math, All in One SEO and WP
+core sitemaps all work as-is.
+
+Don't hand-write the file for a large fleet — use `discover`:
+
+```bash
+python -m site_monitor discover --from-file domains.txt -o sites.yaml
+```
+
+It reads each domain's `robots.txt` first (authoritative), falls back to
+probing the known plugin paths, confirms the sitemap yields pages, and samples
+one page per site to report how many Elementor stylesheets it finds. Domains it
+cannot resolve are written as comments rather than dropped.
+
+Then pre-flight the result before deploying:
+
+```bash
+python -m site_monitor validate
+```
 
 ### `.env`
 
@@ -128,6 +162,8 @@ tool is looking for.
 | `python -m site_monitor check --no-alert` | Same, but print the Telegram message instead of sending it. |
 | `python -m site_monitor check-url <url>` | Check one page. Needs no `sites.yaml`. |
 | `python -m site_monitor check-site <domain>` | Check one configured site. |
+| `python -m site_monitor discover <domains>` | Resolve sitemaps for a domain list and emit `sites.yaml`. |
+| `python -m site_monitor validate` | Pre-flight the configured sites without a full check. |
 | `python -m site_monitor history [--limit N]` | Recent runs from the database. |
 
 **Exit codes:** `0` nothing broken · `1` breakages found · `2` the run itself failed.
@@ -206,6 +242,21 @@ Plain crontab works too:
 
 ---
 
+## Migrating from the legacy `sites` table
+
+The previous PHP monitor stored each site's curated page list as a JSON array
+in a MySQL TEXT column. To convert a phpMyAdmin YAML export of that table:
+
+```bash
+python scripts/import_bosseo_export.py u195624314_bosseo.yml -o sites.yaml
+```
+
+It drops off-domain URLs rather than monitoring them, removes duplicates,
+merges rows that share a hostname, and reports every change it made on stderr
+so nothing disappears quietly.
+
+---
+
 ## Development
 
 ```bash
@@ -213,7 +264,7 @@ pip install -r requirements-dev.txt
 python -m pytest
 ```
 
-77 tests, no network access required — every HTTP interaction runs through
+98 tests, no network access required — every HTTP interaction runs through
 `httpx.MockTransport`, including a fixture that reproduces the dvlfirm.com
 breakage byte for byte.
 
@@ -225,6 +276,7 @@ site_monitor/
   http.py       browser-like AsyncClient, retries with backoff
   sitemap.py    sitemap/index walking, gzip, dedupe
   elementor.py  the detection itself: extract hrefs, HEAD, judge
+  discovery.py  sitemap discovery and pre-flight probing
   crawler.py    orchestration and concurrency limits
   db.py         SQLite schema and writes
   notifier.py   Telegram formatting and delivery

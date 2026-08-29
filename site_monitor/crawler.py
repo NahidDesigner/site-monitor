@@ -21,7 +21,7 @@ class SiteResult:
     """Everything one site's pass produced."""
 
     domain: str
-    sitemap: str
+    sitemap: str = ""
     pages_found: int = 0
     pages: list[PageResult] = field(default_factory=list)
     duration_ms: int = 0
@@ -94,17 +94,26 @@ async def check_site(
     result = SiteResult(domain=site.domain, sitemap=site.sitemap)
 
     limit = site.max_pages or settings.max_pages_per_site or 0
-    try:
-        page_urls = await collect_page_urls(fetcher, site.sitemap, limit=limit)
-    except FetchError as exc:
-        result.error = f"sitemap unreachable: {exc.reason}"
-        result.duration_ms = int((time.perf_counter() - started) * 1000)
-        log.error("%s: %s", site.domain, result.error)
-        return result
+
+    if site.has_explicit_pages:
+        # A curated list is already exact; nothing to fetch or resolve.
+        page_urls = list(site.pages[:limit] if limit else site.pages)
+    else:
+        try:
+            page_urls = await collect_page_urls(fetcher, site.sitemap, limit=limit)
+        except FetchError as exc:
+            result.error = f"sitemap unreachable: {exc.reason}"
+            result.duration_ms = int((time.perf_counter() - started) * 1000)
+            log.error("%s: %s", site.domain, result.error)
+            return result
 
     result.pages_found = len(page_urls)
     if not page_urls:
-        result.error = "sitemap listed no page URLs"
+        result.error = (
+            "site lists no pages"
+            if site.has_explicit_pages
+            else "sitemap listed no page URLs"
+        )
         result.duration_ms = int((time.perf_counter() - started) * 1000)
         log.error("%s: %s", site.domain, result.error)
         return result

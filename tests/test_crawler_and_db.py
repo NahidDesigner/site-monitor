@@ -243,3 +243,79 @@ def test_schema_is_created_and_reopening_is_safe(tmp_path):
     assert path.exists()
     assert database.recent_runs() == []
     database.close()
+
+
+# -- explicit page lists ------------------------------------------------------
+
+
+async def test_explicit_pages_are_checked_without_touching_a_sitemap(tmp_path):
+    """A curated list is exact: nothing is fetched to resolve it."""
+    requested: list[str] = []
+
+    def tracking(request: httpx.Request) -> httpx.Response:
+        requested.append(str(request.url))
+        return handler(request)
+
+    settings = settings_for(
+        tmp_path,
+        sites=(
+            Site(
+                domain="dvlfirm.com",
+                pages=(PAGE_URL, "https://dvlfirm.com/healthy/"),
+            ),
+        ),
+    )
+
+    run = await run_checks(settings, transport=httpx.MockTransport(tracking))
+
+    assert run.sites[0].pages_found == 2
+    assert run.sites[0].broken_asset_count == 1
+    assert not any("sitemap" in url for url in requested)
+
+
+async def test_explicit_pages_win_over_a_sitemap_when_both_are_given(tmp_path):
+    settings = settings_for(
+        tmp_path,
+        sites=(
+            Site(
+                domain="dvlfirm.com",
+                sitemap="https://dvlfirm.com/sitemap.xml",
+                pages=(PAGE_URL,),
+            ),
+        ),
+    )
+
+    run = await run_checks(settings, transport=httpx.MockTransport(handler))
+
+    # The sitemap lists two pages; the explicit list names one.
+    assert run.sites[0].pages_found == 1
+
+
+async def test_max_pages_also_caps_an_explicit_list(tmp_path):
+    settings = settings_for(
+        tmp_path,
+        max_pages_per_site=1,
+        sites=(
+            Site(
+                domain="dvlfirm.com",
+                pages=("https://dvlfirm.com/healthy/", PAGE_URL),
+            ),
+        ),
+    )
+
+    run = await run_checks(settings, transport=httpx.MockTransport(handler))
+
+    assert run.sites[0].pages_checked == 1
+    assert run.sites[0].broken_asset_count == 0  # the healthy page came first
+
+
+async def test_site_with_an_empty_page_list_reports_an_error(tmp_path):
+    settings = settings_for(
+        tmp_path, sites=(Site(domain="dvlfirm.com", pages=()),)
+    )
+    # An empty list with no sitemap cannot happen via load_sites, but the
+    # crawler must still degrade rather than crash.
+
+    run = await run_checks(settings, transport=httpx.MockTransport(handler))
+
+    assert run.sites[0].error

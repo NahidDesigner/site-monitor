@@ -18,6 +18,7 @@ from .discovery import (
     probe_sitemap,
     read_domains,
     render_sites_yaml,
+    sample_page,
 )
 from .elementor import check_page
 from .http import Fetcher, build_client
@@ -300,20 +301,30 @@ async def cmd_validate(settings: Settings, args: argparse.Namespace) -> int:
     async def probe(site) -> SiteProbe:
         async with semaphore:
             result = SiteProbe(
-                domain=site.domain, sitemap=site.sitemap, source="configured"
+                domain=site.domain,
+                sitemap=site.sitemap,
+                source="pages" if site.has_explicit_pages else "sitemap",
             )
             try:
-                count, sample, css_count = await probe_sitemap(
-                    fetcher, site.sitemap, sample_pages=0 if args.no_sample else 1
-                )
+                if site.has_explicit_pages:
+                    result.pages_found = len(site.pages)
+                    if not args.no_sample:
+                        (
+                            result.sample_url,
+                            result.sample_css_count,
+                        ) = await sample_page(fetcher, site.pages)
+                else:
+                    count, sample, css_count = await probe_sitemap(
+                        fetcher, site.sitemap, sample_pages=0 if args.no_sample else 1
+                    )
+                    result.pages_found = count
+                    result.sample_url = sample
+                    result.sample_css_count = css_count
             except Exception as exc:
                 result.error = f"{type(exc).__name__}: {exc}"
                 return result
-            result.pages_found = count
-            result.sample_url = sample
-            result.sample_css_count = css_count
-            if count == 0:
-                result.error = "sitemap listed no pages"
+            if result.pages_found == 0:
+                result.error = "no pages to check"
             return result
 
     async with client:
