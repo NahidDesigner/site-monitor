@@ -404,6 +404,21 @@ def create_app(base_settings: Settings) -> FastAPI:
             )
         return _redirect("/sites", message=f"Saved {clean_domain}")
 
+    @app.post("/sites/{domain}/check")
+    async def site_check(domain: str):
+        """Run a check against one site only — a spot check without waiting
+        for, or paying for, the whole fleet."""
+        with db() as database:
+            match = [s for s in database.list_sites() if s.domain == domain]
+        if not match:
+            return _redirect("/sites", error=f"No site called {domain}")
+
+        manager.refresh_settings(current_settings())
+        started, message = await manager.trigger(trigger=f"site:{domain}", only=match)
+        return _redirect(
+            "/sites", **({"message": message} if started else {"error": message})
+        )
+
     @app.post("/sites/{domain}/toggle")
     async def site_toggle(domain: str):
         with db() as database:

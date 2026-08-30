@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 
 from .config import Settings, Site
@@ -208,14 +208,28 @@ class RunManager:
         """Adopt settings edited in the dashboard, without a restart."""
         self._settings = settings
 
-    async def trigger(self, *, trigger: str = "manual") -> tuple[bool, str]:
-        """Start a run in the background. Returns (started, message)."""
+    async def trigger(
+        self, *, trigger: str = "manual", only: "list[Site] | None" = None
+    ) -> tuple[bool, str]:
+        """Start a run in the background. Returns (started, message).
+
+        `only` scopes the run to specific sites, which is how a single-site
+        spot check works. It still shares the one-run-at-a-time lock: a scoped
+        run and a full run would otherwise hit the same origins at once.
+        """
         async with self._lock:
             if self.is_running:
                 return False, "A check is already running."
 
-            with Database(self._settings.database_path) as database:
-                sites = resolve_sites(self._settings, database)
+            if only:
+                # Pause means "leave out of scheduled runs", not "never check".
+                # Asking for one site by name is an explicit instruction, so it
+                # wins over the flag -- otherwise the button reports success
+                # and quietly does nothing.
+                sites = [replace(site, enabled=True) for site in only]
+            else:
+                with Database(self._settings.database_path) as database:
+                    sites = resolve_sites(self._settings, database)
             if not sites:
                 return False, "No sites are configured yet."
 
@@ -227,6 +241,8 @@ class RunManager:
                 current="starting",
             )
             self._task = asyncio.create_task(self._run(sites))
+            if len(sites) == 1:
+                return True, f"Checking {sites[0].domain}."
             return True, f"Checking {len(sites)} sites."
 
     async def _run(self, sites: list[Site]) -> None:

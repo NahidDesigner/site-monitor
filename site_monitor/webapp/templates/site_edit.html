@@ -10,6 +10,11 @@
     <p>{% if site %}Edit which pages get checked{% else %}Give it a domain and the pages to watch{% endif %}</p>
   </div>
   <span class="spacer"></span>
+  {% if site %}
+  <form method="post" action="/sites/{{ site.domain }}/check" style="display:inline">
+    <button class="btn-primary" type="submit">Check this site now</button>
+  </form>
+  {% endif %}
   <a class="btn" href="/sites">Back to sites</a>
 </div>
 

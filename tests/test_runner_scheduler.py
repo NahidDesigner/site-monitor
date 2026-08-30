@@ -209,3 +209,113 @@ async def test_a_corrupt_next_run_time_is_repaired_not_fatal(tmp_path, scheduler
     assert manager.calls == []
     with Database(tmp_path / "run.db") as database:
         assert database.get_schedule(schedule_id)["next_run_at"] != "not-a-timestamp"
+
+
+# -- single-site spot check ---------------------------------------------------
+
+
+async def test_a_scoped_run_checks_only_the_named_site(tmp_path, monkeypatch):
+    seed(tmp_path, "a.com")
+    seed(tmp_path, "b.com")
+    manager = RunManager(settings_for(tmp_path))
+    checked: list[str] = []
+
+    real = runner_module.run_checks
+
+    async def patched(settings, *, transport=None, on_site_complete=None):
+        checked.extend(site.domain for site in settings.sites)
+        return await real(
+            settings,
+            transport=httpx.MockTransport(handler),
+            on_site_complete=on_site_complete,
+        )
+
+    monkeypatch.setattr(runner_module, "run_checks", patched)
+
+    with Database(tmp_path / "run.db") as database:
+        only = [s for s in database.list_sites() if s.domain == "b.com"]
+
+    started, message = await manager.trigger(only=only)
+    assert started
+    assert "b.com" in message
+    await manager._task
+
+    assert checked == ["b.com"]
+    assert manager.progress.sites_total == 1
+
+
+async def test_a_scoped_run_still_respects_the_one_run_lock(tmp_path):
+    """A spot check and a full run would otherwise hit the same origins."""
+    seed(tmp_path)
+    manager = RunManager(settings_for(tmp_path))
+    manager._progress.state = "running"
+
+    with Database(tmp_path / "run.db") as database:
+        only = database.list_sites()
+
+    started, message = await manager.trigger(only=only)
+
+    assert not started
+    assert "already running" in message
+
+
+async def test_a_spot_check_overrides_a_paused_site(tmp_path, monkeypatch):
+    """Pause means "leave out of scheduled runs", not "never check".
+
+    Without this the button reported success and quietly ran nothing, because
+    run_checks filters disabled sites out.
+    """
+    with Database(tmp_path / "run.db") as database:
+        database.upsert_site(
+            domain="paused.com", pages=["https://paused.com/"], enabled=False
+        )
+        only = database.list_sites()
+
+    manager = RunManager(settings_for(tmp_path))
+    checked: list[str] = []
+    real = runner_module.run_checks
+
+    async def patched(settings, *, transport=None, on_site_complete=None):
+        checked.extend(site.domain for site in settings.sites if site.enabled)
+        return await real(
+            settings,
+            transport=httpx.MockTransport(handler),
+            on_site_complete=on_site_complete,
+        )
+
+    monkeypatch.setattr(runner_module, "run_checks", patched)
+
+    started, _ = await manager.trigger(only=only)
+    assert started
+    await manager._task
+
+    assert checked == ["paused.com"]
+    assert manager.progress.pages_checked == 1
+
+
+async def test_a_full_run_still_skips_paused_sites(tmp_path, monkeypatch):
+    """The override applies only to an explicit request, not the scheduled sweep."""
+    with Database(tmp_path / "run.db") as database:
+        database.upsert_site(domain="on.com", pages=["https://on.com/"])
+        database.upsert_site(
+            domain="off.com", pages=["https://off.com/"], enabled=False
+        )
+
+    manager = RunManager(settings_for(tmp_path))
+    checked: list[str] = []
+    real = runner_module.run_checks
+
+    async def patched(settings, *, transport=None, on_site_complete=None):
+        checked.extend(site.domain for site in settings.sites)
+        return await real(
+            settings,
+            transport=httpx.MockTransport(handler),
+            on_site_complete=on_site_complete,
+        )
+
+    monkeypatch.setattr(runner_module, "run_checks", patched)
+
+    await manager.trigger()
+    await manager._task
+
+    assert checked == ["on.com"]

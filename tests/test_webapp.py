@@ -426,3 +426,36 @@ def test_repeated_bad_passwords_eventually_lock_the_login(client, monkeypatch):
     assert "Too many attempts" in last
     # And the real password is refused too, while the lock holds.
     assert "Too many attempts" in client.post("/login", data={"password": PASSWORD}).text
+
+
+def test_a_single_site_can_be_checked_from_the_sites_list(signed_in, database, monkeypatch):
+    signed_in.post("/sites/save", data={"domain": "a.com", "pages": "https://a.com/"})
+    signed_in.post("/sites/save", data={"domain": "b.com", "pages": "https://b.com/"})
+
+    scoped: list = []
+
+    async def fake_trigger(self, *, trigger="manual", only=None):
+        scoped.append([s.domain for s in (only or [])])
+        return True, "started"
+
+    from site_monitor.runner import RunManager
+
+    monkeypatch.setattr(RunManager, "trigger", fake_trigger)
+
+    response = signed_in.post("/sites/b.com/check", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert scoped == [["b.com"]]
+
+
+def test_checking_an_unknown_site_reports_it(signed_in):
+    response = signed_in.post("/sites/nope.com/check", follow_redirects=False)
+
+    assert "error=" in response.headers["location"]
+
+
+def test_the_sites_list_offers_a_per_site_check(signed_in):
+    signed_in.post("/sites/save", data={"domain": "a.com", "pages": "https://a.com/"})
+
+    assert "/sites/a.com/check" in signed_in.get("/sites").text
+    assert "Check this site now" in signed_in.get("/sites/edit/a.com").text
