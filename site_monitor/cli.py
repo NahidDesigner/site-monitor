@@ -5,11 +5,12 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import os
 import sys
 
 from pathlib import Path
 
-from .config import ConfigError, Settings
+from .config import ConfigError, Settings, _env_int
 from .crawler import RunResult, check_site, run_checks
 from .db import Database
 from .discovery import (
@@ -446,8 +447,12 @@ def build_parser() -> argparse.ArgumentParser:
     sites_cmd.set_defaults(handler=cmd_sites, sites_action="list")
 
     serve = sub.add_parser("serve", help="run the web dashboard")
-    serve.add_argument("--host", default="0.0.0.0")
-    serve.add_argument("--port", type=int, default=8080)
+    serve.add_argument("--host", default=os.getenv("HOST", "0.0.0.0"))
+    # Follow the platform's PORT if it sets one. Coolify, Railway and friends
+    # pick a port, route their proxy to it, and expect the app to listen there;
+    # hardcoding a different one is the usual cause of a 502 in front of a
+    # perfectly healthy container.
+    serve.add_argument("--port", type=int, default=_env_int("PORT", 8080))
     serve.set_defaults(handler=cmd_serve)
 
     history = sub.add_parser("history", help="list recent runs")

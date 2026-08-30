@@ -24,6 +24,8 @@ APP_ENV_VARS = (
     "MAX_PAGES_PER_SITE",
     "LOG_LEVEL",
     "DRY_RUN",
+    "PORT",
+    "HOST",
 )
 
 

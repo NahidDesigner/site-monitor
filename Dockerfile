@@ -24,4 +24,6 @@ EXPOSE 8080
 # The dashboard runs the scheduler in-process, so this one container is the
 # whole application: no separate cron, no scheduled task to configure.
 ENTRYPOINT ["python", "-m", "site_monitor"]
-CMD ["serve", "--host", "0.0.0.0", "--port", "8080"]
+# No --port here on purpose: serve reads PORT, so the app follows whatever
+# port the platform assigns instead of insisting on its own.
+CMD ["serve"]

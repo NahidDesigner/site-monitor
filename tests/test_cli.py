@@ -184,3 +184,33 @@ def test_history_lists_recorded_runs(tmp_path, monkeypatch, capsys):
 def test_no_subcommand_prints_help(capsys):
     assert cli.main([]) == cli.EXIT_ERROR
     assert "usage: site-monitor" in capsys.readouterr().out
+
+
+# -- port selection -----------------------------------------------------------
+
+
+def test_serve_follows_the_platform_port(monkeypatch):
+    """A proxy routing to its own PORT while the app insists on another is the
+    classic 502 in front of a healthy container."""
+    monkeypatch.setenv("PORT", "3000")
+
+    assert cli.build_parser().parse_args(["serve"]).port == 3000
+
+
+def test_serve_defaults_to_8080_without_a_platform_port(monkeypatch):
+    monkeypatch.delenv("PORT", raising=False)
+
+    assert cli.build_parser().parse_args(["serve"]).port == 8080
+
+
+def test_an_explicit_flag_beats_the_environment(monkeypatch):
+    monkeypatch.setenv("PORT", "3000")
+
+    assert cli.build_parser().parse_args(["serve", "--port", "9999"]).port == 9999
+
+
+def test_serve_binds_all_interfaces_by_default(monkeypatch):
+    """Binding to localhost inside a container makes it unreachable."""
+    monkeypatch.delenv("HOST", raising=False)
+
+    assert cli.build_parser().parse_args(["serve"]).host == "0.0.0.0"
