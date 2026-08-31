@@ -28,6 +28,7 @@ PS_ROW = {
     "performance": 87.0, "lcp_ms": 2450.7, "cls": 0.021, "tbt_ms": 310.0,
     "fcp_ms": 1200.0, "speed_index": None, "tti_ms": None, "error": None,
     "tested_at": "2026-08-29T01:00:00+00:00",
+    "report_url": "https://pagespeed.web.dev/analysis?url=https%3A%2F%2Fa.com%2F&form_factor=mobile",
 }
 
 
@@ -91,3 +92,20 @@ def test_sheet_titles_are_truncated_to_excels_limit():
     ).active
 
     assert len(sheet.title) <= 31
+
+
+def test_a_row_missing_a_newer_column_still_exports():
+    """Columns get added over time; an older row must not break the download."""
+    older = {key: value for key, value in PS_ROW.items() if key != "report_url"}
+
+    body = to_csv([older], PAGESPEED_COLUMNS)
+
+    assert body.strip().endswith(",")  # the missing column comes out empty
+    assert "a.com" in body
+
+
+def test_the_pagespeed_export_carries_the_shareable_report_link():
+    body = to_csv([PS_ROW], PAGESPEED_COLUMNS)
+
+    assert "PageSpeed report" in body.splitlines()[0]
+    assert "pagespeed.web.dev" in body.splitlines()[1]

@@ -60,6 +60,21 @@
 </div>
 {% endif %}
 
+{% if missing and view == 'paired' %}
+<div class="banner info">
+  {{ missing|length }} page{{ '' if missing|length == 1 else 's' }} {{ 'has' if missing|length == 1 else 'have' }}
+  a score for only one device — usually a sweep that was cut short, or a URL that
+  failed on one of the two. Press <strong>Test now</strong> to fill the gaps.
+</div>
+{% endif %}
+
+<div class="tabs" style="margin-bottom:14px">
+  <a href="?view=paired&amp;sort={{ sort }}&amp;dir={{ dir }}{% if domain %}&amp;domain={{ domain }}{% endif %}{% if run_id %}&amp;run_id={{ run_id }}{% endif %}"
+     class="{{ 'on' if view == 'paired' }}">Mobile &amp; desktop</a>
+  <a href="?view=flat&amp;sort={{ sort }}&amp;dir={{ dir }}{% if domain %}&amp;domain={{ domain }}{% endif %}{% if strategy %}&amp;strategy={{ strategy }}{% endif %}{% if run_id %}&amp;run_id={{ run_id }}{% endif %}"
+     class="{{ 'on' if view == 'flat' }}">Every test</a>
+</div>
+
 <form method="get" class="card" style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
   <div style="flex:1;min-width:170px">
     <label for="f-domain">Site</label>
@@ -88,11 +103,62 @@
     </select>
   </div>
   <input type="hidden" name="sort" value="{{ sort }}"><input type="hidden" name="dir" value="{{ dir }}">
+  <input type="hidden" name="view" value="{{ view }}">
   <button type="submit">Apply</button>
   {% if domain or strategy or run_id %}<a class="btn" href="/pagespeed">Clear</a>{% endif %}
 </form>
 
-{% if results %}
+{% if view == 'paired' %}
+  {% if pairs %}
+  <div class="card" style="padding:0">
+    <div class="tablewrap"><table>
+      <tr>
+        <th>{{ sortlink('domain', 'Site') }}</th>
+        <th>Page</th>
+        <th class="num">Mobile</th>
+        <th class="num">Desktop</th>
+        <th class="num">{{ sortlink('lcp', 'LCP') }}</th>
+        <th class="num">{{ sortlink('cls', 'CLS') }}</th>
+        <th>Share</th>
+        <th>{{ sortlink('tested_at', 'Tested') }}</th>
+      </tr>
+      {% for row in pairs %}
+      {% set m = row['mobile'] %}{% set d = row['desktop'] %}
+      <tr>
+        <td><strong>{{ row['domain'] }}</strong></td>
+        <td class="u" style="max-width:260px">
+          <a href="{{ row['url'] }}" target="_blank" rel="noopener">{{ row['url'] }}</a></td>
+        <td class="num">{% if m %}{{ score(m['performance']) }}{% else %}<span class="pill off">not tested</span>{% endif %}</td>
+        <td class="num">{% if d %}{{ score(d['performance']) }}{% else %}<span class="pill off">not tested</span>{% endif %}</td>
+        <td class="num">{{ ms(m['lcp_ms']) if m else (ms(d['lcp_ms']) if d else '—') }}</td>
+        <td class="num">{% if m %}{{ m['cls'] if m['cls'] is not none else '—' }}
+            {%- elif d %}{{ d['cls'] if d['cls'] is not none else '—' }}{% else %}—{% endif %}</td>
+        <td style="white-space:nowrap">
+          {% if m and m['report_url'] %}<a class="btn btn-sm" href="{{ m['report_url'] }}" target="_blank" rel="noopener">Mobile</a>{% endif %}
+          {% if d and d['report_url'] %}<a class="btn btn-sm" href="{{ d['report_url'] }}" target="_blank" rel="noopener">Desktop</a>{% endif %}
+        </td>
+        <td style="font-size:12px">{{ ago(row['tested_at']) }}</td>
+      </tr>
+      {% if (m and m['error']) or (d and d['error']) %}
+      <tr><td colspan="8" style="color:var(--bad);font-size:12.5px;padding-top:0">
+        {{ (m['error'] if m and m['error'] else '') }}{{ ' · ' if m and m['error'] and d and d['error'] else '' }}{{ (d['error'] if d and d['error'] else '') }}
+      </td></tr>
+      {% endif %}
+      {% endfor %}
+    </table></div>
+  </div>
+  <p class="hint">{{ pairs|length }} page(s). Scores are the Lighthouse performance
+     score out of 100; LCP is mobile where available. The share links open the public
+     PageSpeed report for that page — Google runs a fresh audit, so the numbers can
+     move slightly from the snapshot above.</p>
+  {% else %}
+  <div class="card empty">
+    <p>No PageSpeed results yet.</p>
+    <form method="post" action="/pagespeed/run"><button class="btn-primary" type="submit">Run the first test</button></form>
+  </div>
+  {% endif %}
+
+{% elif results %}
 <div class="card" style="padding:0">
   <div class="tablewrap"><table>
     <tr>
@@ -103,6 +169,7 @@
       <th class="num">{{ sortlink('lcp', 'LCP') }}</th>
       <th class="num">{{ sortlink('cls', 'CLS') }}</th>
       <th class="num">{{ sortlink('tbt', 'TBT') }}</th>
+      <th>Share</th>
       <th>{{ sortlink('tested_at', 'Tested') }}</th>
     </tr>
     {% for row in results %}
@@ -114,10 +181,12 @@
       <td class="num">{{ ms(row['lcp_ms']) }}</td>
       <td class="num">{{ row['cls'] if row['cls'] is not none else '—' }}</td>
       <td class="num">{{ ms(row['tbt_ms']) }}</td>
+      <td>{% if row['report_url'] %}<a class="btn btn-sm" href="{{ row['report_url'] }}"
+             target="_blank" rel="noopener">Report</a>{% endif %}</td>
       <td style="font-size:12px">{{ ago(row['tested_at']) }}</td>
     </tr>
     {% if row['error'] %}
-    <tr><td colspan="8" style="color:var(--bad);font-size:12.5px;padding-top:0">{{ row['error'] }}</td></tr>
+    <tr><td colspan="9" style="color:var(--bad);font-size:12.5px;padding-top:0">{{ row['error'] }}</td></tr>
     {% endif %}
     {% endfor %}
   </table></div>

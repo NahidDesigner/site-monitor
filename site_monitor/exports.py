@@ -29,6 +29,7 @@ PAGESPEED_COLUMNS = [
     ("tti_ms", "TTI (ms)"),
     ("error", "Error"),
     ("tested_at", "Tested (UTC)"),
+    ("report_url", "PageSpeed report"),
 ]
 
 RUNS_COLUMNS = [
@@ -43,6 +44,19 @@ RUNS_COLUMNS = [
 ]
 
 
+def _value(row, key):
+    """A cell's value, tolerating a column a given row does not carry.
+
+    Rows come from several queries and columns get added over time; a report
+    should not fail to download because one of them predates a column.
+    """
+    try:
+        value = row[key]
+    except (KeyError, IndexError):
+        return ""
+    return "" if value is None else value
+
+
 def timestamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
@@ -52,9 +66,7 @@ def to_csv(rows, columns) -> str:
     writer = csv.writer(buffer, lineterminator="\n")
     writer.writerow([label for _, label in columns])
     for row in rows:
-        writer.writerow(
-            ["" if row[key] is None else row[key] for key, _ in columns]
-        )
+        writer.writerow([_value(row, key) for key, _ in columns])
     return buffer.getvalue()
 
 
@@ -82,8 +94,8 @@ def to_xlsx(rows, columns, *, sheet_title: str) -> bytes:
     for row in rows:
         values = []
         for position, (key, _) in enumerate(columns):
-            value = row[key]
-            values.append("" if value is None else value)
+            value = _value(row, key)
+            values.append(value)
             widths[position] = max(widths[position], min(len(str(value or "")) + 2, 70))
         sheet.append(values)
 

@@ -516,11 +516,19 @@ def create_app(base_settings: Settings) -> FastAPI:
         domain: str = Query(""),
         strategy: str = Query(""),
         run_id: str = Query(""),
+        view: str = Query("paired"),
         message: str = "",
         error: str = "",
     ):
         with db() as database:
             selected_run = int(run_id) if str(run_id).isdigit() else None
+            pairs = database.pagespeed_pairs(
+                run_id=selected_run,
+                domain=domain or None,
+                sort=sort,
+                direction=dir,
+                limit=500,
+            )
             results = database.pagespeed_results(
                 run_id=selected_run,
                 domain=domain or None,
@@ -534,6 +542,9 @@ def create_app(base_settings: Settings) -> FastAPI:
                 "pagespeed.html",
                 active="pagespeed",
                 results=results,
+                pairs=pairs,
+                view="flat" if view == "flat" else "paired",
+                missing=[p for p in pairs if not p["mobile"] or not p["desktop"]],
                 runs=database.pagespeed_runs(30),
                 domains=database.pagespeed_domains(),
                 sort=sort,

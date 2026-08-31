@@ -138,7 +138,8 @@ CREATE TABLE IF NOT EXISTS pagespeed_results (
     speed_index  REAL,
     tti_ms       REAL,
     error        TEXT,
-    tested_at    TEXT    NOT NULL
+    tested_at    TEXT    NOT NULL,
+    report_url   TEXT    NOT NULL DEFAULT ''
 );
 
 CREATE INDEX IF NOT EXISTS idx_ps_results_run    ON pagespeed_results(run_id);
@@ -180,6 +181,7 @@ class Database:
         ("runs", "scope", "scope TEXT NOT NULL DEFAULT ''"),
         ("pagespeed_runs", "trigger", "trigger TEXT NOT NULL DEFAULT ''"),
         ("pagespeed_runs", "expected", "expected INTEGER NOT NULL DEFAULT 0"),
+        ("pagespeed_results", "report_url", "report_url TEXT NOT NULL DEFAULT ''"),
     )
 
     def _migrate(self) -> None:
@@ -630,8 +632,8 @@ class Database:
                 """
                 INSERT INTO pagespeed_results (
                     run_id, domain, url, strategy, performance, fcp_ms, lcp_ms,
-                    cls, tbt_ms, speed_index, tti_ms, error, tested_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    cls, tbt_ms, speed_index, tti_ms, error, tested_at, report_url
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     run_id,
@@ -647,6 +649,7 @@ class Database:
                     result.tti_ms,
                     result.error,
                     utcnow(),
+                    result.report_url,
                 ),
             )
 
@@ -702,6 +705,60 @@ class Database:
                 params,
             )
         )
+
+    def pagespeed_pairs(
+        self,
+        *,
+        run_id: int | None = None,
+        domain: str | None = None,
+        sort: str = "tested_at",
+        direction: str = "desc",
+        limit: int = 500,
+    ) -> list[dict]:
+        """Results paired by URL, one entry per page with both devices.
+
+        A page tested on only one device is still returned, with the missing
+        device left as None -- that gap is exactly what needs to be visible.
+        """
+        rows = self.pagespeed_results(
+            run_id=run_id, domain=domain, sort="tested_at", direction="desc",
+            limit=limit * 2,
+        )
+
+        paired: dict[str, dict] = {}
+        for row in rows:
+            entry = paired.setdefault(
+                row["url"],
+                {
+                    "domain": row["domain"],
+                    "url": row["url"],
+                    "mobile": None,
+                    "desktop": None,
+                    "tested_at": row["tested_at"],
+                },
+            )
+            # Rows arrive newest first, so only the first of each device wins.
+            if row["strategy"] in ("mobile", "desktop") and entry[row["strategy"]] is None:
+                entry[row["strategy"]] = row
+            if row["tested_at"] > entry["tested_at"]:
+                entry["tested_at"] = row["tested_at"]
+
+        entries = list(paired.values())
+
+        def key(entry):
+            if sort == "domain":
+                return (entry["domain"], entry["url"])
+            if sort in ("performance", "lcp", "cls", "tbt"):
+                column = {"performance": "performance", "lcp": "lcp_ms",
+                          "cls": "cls", "tbt": "tbt_ms"}[sort]
+                # Sort on mobile, the stricter of the two; missing goes last.
+                source = entry["mobile"] or entry["desktop"]
+                value = source[column] if source else None
+                return (value is None, value if value is not None else 0)
+            return (entry["tested_at"],)
+
+        entries.sort(key=key, reverse=(direction == "desc" and sort != "domain"))
+        return entries[:limit]
 
     def latest_pagespeed_run(self) -> sqlite3.Row | None:
         return self._conn.execute(

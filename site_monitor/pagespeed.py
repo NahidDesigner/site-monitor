@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass
-from datetime import datetime, timezone
+from dataclasses import dataclass, field
+from urllib.parse import quote
 
 import httpx
 
@@ -22,6 +22,21 @@ from .http import FetchError, Fetcher, build_client
 log = logging.getLogger(__name__)
 
 API_URL = "https://www.googleapis.com/pagespeedonline/v5/runPagespeed"
+REPORT_BASE = "https://pagespeed.web.dev/analysis"
+
+
+def report_link(url: str, strategy: str) -> str:
+    """A shareable PageSpeed Insights page for this URL and device.
+
+    Google's API returns no permalink for a run it performed, so this points
+    at the public report for the same URL. Opening it makes Google run a fresh
+    audit, which means the numbers can differ slightly from the snapshot stored
+    here -- Lighthouse scores vary between runs on the same page.
+    """
+    if not url:
+        return ""
+    device = strategy if strategy in ("mobile", "desktop") else "mobile"
+    return f"{REPORT_BASE}?url={quote(url, safe='')}&form_factor={device}"
 
 # Lighthouse audit ids -> the column we keep them in.
 AUDIT_FIELDS = {
@@ -49,6 +64,11 @@ class PageSpeedResult:
     speed_index: float | None = None
     tti_ms: float | None = None
     error: str | None = None
+    report_url: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.report_url and self.url:
+            self.report_url = report_link(self.url, self.strategy)
 
     @property
     def ok(self) -> bool:

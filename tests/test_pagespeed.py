@@ -156,3 +156,104 @@ def test_sort_key_is_whitelisted_against_injection(tmp_path):
         # A bogus sort key falls back to the default instead of reaching SQL.
         assert database.pagespeed_results(sort="url; DROP TABLE runs--") == []
         assert database.recent_runs() == []
+
+
+# -- shareable report links ---------------------------------------------------
+
+
+def test_a_result_carries_a_shareable_report_link():
+    from site_monitor.pagespeed import report_link
+
+    result = parse_response("a.com", "https://a.com/page/?x=1", "mobile", REPORT)
+
+    assert result.report_url == report_link("https://a.com/page/?x=1", "mobile")
+    assert "pagespeed.web.dev" in result.report_url
+    # The URL must survive being embedded as a query parameter.
+    assert "https%3A%2F%2Fa.com%2Fpage%2F%3Fx%3D1" in result.report_url
+    assert "form_factor=mobile" in result.report_url
+
+
+def test_the_link_reflects_the_device_tested():
+    from site_monitor.pagespeed import report_link
+
+    assert report_link("https://a.com/", "desktop").endswith("form_factor=desktop")
+    # Anything unrecognised falls back to mobile rather than an invalid link.
+    assert report_link("https://a.com/", "watch").endswith("form_factor=mobile")
+
+
+def test_no_link_without_a_url():
+    from site_monitor.pagespeed import report_link
+
+    assert report_link("", "mobile") == ""
+
+
+# -- pairing mobile with desktop ----------------------------------------------
+
+
+def _record(database, run_id, domain, url, strategy, score):
+    from site_monitor.pagespeed import PageSpeedResult
+
+    database.record_pagespeed_result(
+        run_id,
+        PageSpeedResult(domain=domain, url=url, strategy=strategy,
+                        performance=score, lcp_ms=2000.0, cls=0.05, tbt_ms=100.0),
+    )
+
+
+def test_both_devices_pair_onto_one_row(tmp_path):
+    with Database(tmp_path / "p.db") as database:
+        run_id = database.start_pagespeed_run()
+        _record(database, run_id, "a.com", "https://a.com/", "mobile", 56.0)
+        _record(database, run_id, "a.com", "https://a.com/", "desktop", 88.0)
+
+        pairs = database.pagespeed_pairs()
+
+    assert len(pairs) == 1
+    assert pairs[0]["mobile"]["performance"] == 56.0
+    assert pairs[0]["desktop"]["performance"] == 88.0
+
+
+def test_a_page_tested_on_one_device_still_appears_with_the_gap_visible(tmp_path):
+    """A half-finished sweep must not hide the pages it never got to."""
+    with Database(tmp_path / "p.db") as database:
+        run_id = database.start_pagespeed_run()
+        _record(database, run_id, "a.com", "https://a.com/", "mobile", 56.0)
+
+        pairs = database.pagespeed_pairs()
+
+    assert pairs[0]["mobile"] is not None
+    assert pairs[0]["desktop"] is None
+
+
+def test_pairs_keep_the_newest_result_for_each_device(tmp_path):
+    with Database(tmp_path / "p.db") as database:
+        old = database.start_pagespeed_run()
+        _record(database, old, "a.com", "https://a.com/", "mobile", 40.0)
+        new = database.start_pagespeed_run()
+        _record(database, new, "a.com", "https://a.com/", "mobile", 72.0)
+
+        pairs = database.pagespeed_pairs()
+
+    assert len(pairs) == 1
+    assert pairs[0]["mobile"]["performance"] == 72.0
+
+
+def test_pairs_can_be_filtered_to_one_run(tmp_path):
+    with Database(tmp_path / "p.db") as database:
+        first = database.start_pagespeed_run()
+        _record(database, first, "a.com", "https://a.com/", "mobile", 40.0)
+        second = database.start_pagespeed_run()
+        _record(database, second, "b.com", "https://b.com/", "mobile", 70.0)
+
+        assert [p["domain"] for p in database.pagespeed_pairs(run_id=first)] == ["a.com"]
+
+
+def test_pairs_sort_by_mobile_score_worst_first(tmp_path):
+    with Database(tmp_path / "p.db") as database:
+        run_id = database.start_pagespeed_run()
+        _record(database, run_id, "fast.com", "https://fast.com/", "mobile", 95.0)
+        _record(database, run_id, "slow.com", "https://slow.com/", "mobile", 22.0)
+
+        pairs = database.pagespeed_pairs(sort="performance", direction="asc")
+
+    assert [p["domain"] for p in pairs] == ["slow.com", "fast.com"]
