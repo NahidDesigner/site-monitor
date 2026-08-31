@@ -48,6 +48,8 @@
   <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px">
     <h2 style="margin:0">Broken right now</h2>
     <span class="spacer"></span>
+    <button class="btn-sm" type="button" data-copy="page">Copy page URLs</button>
+    <button class="btn-sm" type="button" data-copy="asset">Copy CSS URLs</button>
     <a class="btn btn-sm" href="/export/broken.csv">Download CSV</a>
     <a class="btn btn-sm" href="/export/broken.xlsx">Download Excel</a>
   </div>
@@ -57,9 +59,9 @@
       {% set pages = {} %}
       {% for row in rows %}{% if pages.update({row['page_url']: pages.get(row['page_url'], []) + [row]}) %}{% endif %}{% endfor %}
       {% for page_url, items in pages.items() %}
-        <p class="pg"><a href="{{ page_url }}" target="_blank" rel="noopener">{{ page_url }}</a></p>
+        <p class="pg" data-page-url="{{ page_url }}"><a href="{{ page_url }}" target="_blank" rel="noopener">{{ page_url }}</a></p>
         {% for item in items %}
-          <p class="as">{{ item['asset_url'].split('/')|last }}
+          <p class="as" data-asset-url="{{ item['asset_url'] }}">{{ item['asset_url'].split('/')|last }}
              <span class="why">— {{ item['reason'] }}</span></p>
         {% endfor %}
       {% endfor %}

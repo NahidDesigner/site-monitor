@@ -459,3 +459,59 @@ def test_the_sites_list_offers_a_per_site_check(signed_in):
 
     assert "/sites/a.com/check" in signed_in.get("/sites").text
     assert "Check this site now" in signed_in.get("/sites/edit/a.com").text
+
+
+# -- returning to where a button was pressed ----------------------------------
+
+
+def test_run_returns_to_the_page_it_was_pressed_on(signed_in, monkeypatch):
+    """From the Sites page you want to watch rows tick off, not be bounced away."""
+    from site_monitor.runner import RunManager
+
+    async def fake(self, *, trigger="manual", only=None):
+        return True, "started"
+
+    monkeypatch.setattr(RunManager, "trigger", fake)
+
+    response = signed_in.post(
+        "/run", headers={"referer": "http://testserver/sites"}, follow_redirects=False
+    )
+
+    assert response.headers["location"].startswith("/sites")
+
+
+def test_a_foreign_referer_is_not_followed(signed_in, monkeypatch):
+    """Taking Referer at face value would be an open redirect."""
+    from site_monitor.runner import RunManager
+
+    async def fake(self, *, trigger="manual", only=None):
+        return True, "started"
+
+    monkeypatch.setattr(RunManager, "trigger", fake)
+
+    response = signed_in.post(
+        "/run", headers={"referer": "https://evil.test/phish"}, follow_redirects=False
+    )
+
+    assert response.headers["location"].startswith("/?")
+
+
+def test_run_without_a_referer_falls_back_to_the_overview(signed_in, monkeypatch):
+    from site_monitor.runner import RunManager
+
+    async def fake(self, *, trigger="manual", only=None):
+        return True, "started"
+
+    monkeypatch.setattr(RunManager, "trigger", fake)
+
+    response = signed_in.post("/run", follow_redirects=False)
+
+    assert response.headers["location"].startswith("/?")
+
+
+def test_progress_reports_which_sites_are_done(signed_in):
+    """The Sites page needs per-site outcomes to tick rows off live."""
+    status = signed_in.get("/api/run/status").json()
+
+    assert "done_domains" in status
+    assert "broken_domains" in status

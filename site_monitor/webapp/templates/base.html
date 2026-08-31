@@ -134,6 +134,19 @@ textarea{min-height:230px;resize:vertical;line-height:1.6}
 .track{flex:1;min-width:170px;height:5px;background:var(--surface-2);border-radius:3px;overflow:hidden}
 .track i{display:block;height:100%;background:var(--copper);width:0;transition:width .4s ease}
 
+/* live per-site status during a run */
+.site-live{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;
+  letter-spacing:.05em;text-transform:uppercase}
+.site-live.checking{color:var(--copper)}
+.site-live.clean{color:var(--ok)}
+.site-live.broken{color:var(--bad)}
+.spinner{width:11px;height:11px;border:2px solid currentColor;border-right-color:transparent;
+  border-radius:50%;display:inline-block;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spinner{animation:none;opacity:.6}}
+tr[data-site].is-done{background:color-mix(in srgb,var(--ok) 6%,transparent)}
+tr[data-site].is-broken{background:color-mix(in srgb,var(--bad) 7%,transparent)}
+
 .empty{text-align:center;padding:44px 20px;color:var(--ink-faint)}
 .empty p{margin:0 0 16px}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
@@ -187,6 +200,7 @@ textarea{min-height:230px;resize:vertical;line-height:1.6}
     var running = p.state==='running';
     bar.classList.toggle('on', running);
     if(btn){ btn.disabled=running; btn.textContent = running ? 'Checking…' : 'Run check now'; }
+    paintSites(p);
     if(running){
       fill.style.width=p.percent+'%';
       txt.textContent='Checking '+p.sites_done+' of '+p.sites_total+' sites';
@@ -194,9 +208,11 @@ textarea{min-height:230px;resize:vertical;line-height:1.6}
         + (p.current ? ' · '+p.current : '');
       wasRunning=true;
     } else if(wasRunning){
-      // A run just ended: reload so the page shows what it found.
       wasRunning=false;
-      window.location.reload();
+      // On the Sites page the green ticks are the result, so keep them.
+      // Everywhere else, reload to show what the run found.
+      if(siteRows.length){ paintSites(p); }
+      else { window.location.reload(); }
     }
     schedule(running ? 1500 : 8000);
   }
@@ -227,6 +243,77 @@ textarea{min-height:230px;resize:vertical;line-height:1.6}
       .then(function(p){ if(p) paintPs(p); })
       .catch(function(){});
   }
+  // ---- copy broken URLs, one per line ----------------------------------
+  function copyText(text, btn){
+    var label = btn.textContent;
+    function done(ok){
+      btn.textContent = ok ? 'Copied' : 'Press \u2318C';
+      setTimeout(function(){ btn.textContent = label; }, 1600);
+    }
+    if(navigator.clipboard && window.isSecureContext){
+      navigator.clipboard.writeText(text).then(function(){ done(true); },
+                                              function(){ fallback(text, done); });
+    } else { fallback(text, done); }
+  }
+  function fallback(text, done){
+    // Older browsers, and any page not served over HTTPS.
+    var ta = document.createElement('textarea');
+    ta.value = text; ta.setAttribute('readonly','');
+    ta.style.position='fixed'; ta.style.top='-1000px';
+    document.body.appendChild(ta); ta.select();
+    var ok=false; try{ ok = document.execCommand('copy'); }catch(e){}
+    document.body.removeChild(ta); done(ok);
+  }
+  document.querySelectorAll('[data-copy]').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var attr = btn.getAttribute('data-copy')==='page' ? 'data-page-url' : 'data-asset-url';
+      var seen = {}, urls = [];
+      document.querySelectorAll('['+attr+']').forEach(function(el){
+        var url = el.getAttribute(attr);
+        if(url && !seen[url]){ seen[url]=1; urls.push(url); }
+      });
+      if(!urls.length){ return; }
+      copyText(urls.join('\n'), btn);
+    });
+  });
+
+  // ---- tick sites off as the run reaches them ---------------------------
+  var siteRows = document.querySelectorAll('tr[data-site]');
+
+  function paintSites(p){
+    if(!siteRows.length) return;
+    var done = {}, broken = {};
+    (p.done_domains||[]).forEach(function(d){ done[d]=1; });
+    (p.broken_domains||[]).forEach(function(d){ broken[d]=1; });
+    var running = p.state==='running';
+
+    siteRows.forEach(function(row){
+      var domain = row.getAttribute('data-site');
+      var live = row.querySelector('.site-live');
+      var state = row.querySelector('.site-state');
+      if(!live) return;
+
+      if(done[domain]){
+        live.hidden = false;
+        live.className = 'site-live ' + (broken[domain] ? 'broken' : 'clean');
+        live.textContent = broken[domain] ? '\u2715 broken' : '\u2713 checked';
+        row.classList.toggle('is-done', !broken[domain]);
+        row.classList.toggle('is-broken', !!broken[domain]);
+        if(state) state.hidden = true;
+      } else if(running){
+        live.hidden = false;
+        live.className = 'site-live checking';
+        live.innerHTML = '<span class="spinner"></span>' +
+          (p.current===domain ? 'checking' : 'queued');
+        if(state) state.hidden = true;
+      } else {
+        // Idle and never checked in this session: leave the row as rendered.
+        live.hidden = true;
+        if(state) state.hidden = false;
+      }
+    });
+  }
+
   if(document.getElementById('runform')){
     document.getElementById('runform').addEventListener('submit',function(){
       if(btn){ btn.disabled=true; btn.textContent='Starting\u2026'; }

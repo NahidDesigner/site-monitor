@@ -19,13 +19,16 @@
   <div class="tablewrap"><table>
     <tr><th>Domain</th><th>Source</th><th class="num">Pages</th><th>Status</th><th></th></tr>
     {% for site in sites %}
-    <tr>
+    <tr data-site="{{ site.domain }}">
       <td><a href="/sites/edit/{{ site.domain }}"><strong>{{ site.domain }}</strong></a></td>
       <td style="color:var(--ink-faint);font-size:12.5px">
         {% if site.pages %}curated list{% else %}<span class="mono">{{ site.sitemap }}</span>{% endif %}</td>
       <td class="num">{{ site.pages|length if site.pages else '—' }}</td>
-      <td>{% if site.enabled %}<span class="pill ok">active</span>
-          {% else %}<span class="pill off">paused</span>{% endif %}</td>
+      <td>
+        <span class="site-state">{% if site.enabled %}<span class="pill ok">active</span>
+          {% else %}<span class="pill off">paused</span>{% endif %}</span>
+        <span class="site-live" hidden></span>
+      </td>
       <td style="text-align:right;white-space:nowrap">
         <form method="post" action="/sites/{{ site.domain }}/check" style="display:inline">
           <button class="btn-sm" type="submit" title="Check just this site now">Check</button>

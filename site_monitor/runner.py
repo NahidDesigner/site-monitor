@@ -65,6 +65,10 @@ class RunProgress:
     broken_assets: int = 0
     sites_with_findings: int = 0
     current: str = ""
+    # Which sites have finished, and which of those had something wrong.
+    # The Sites page uses these to tick rows off as the run proceeds.
+    done_domains: list[str] = field(default_factory=list)
+    broken_domains: list[str] = field(default_factory=list)
     alert_sent: int | None = None
     error: str | None = None
     trigger: str = ""
@@ -256,8 +260,10 @@ class RunManager:
                     progress.pages_checked += result.pages_checked
                     progress.assets_checked += result.assets_checked
                     progress.broken_assets += result.broken_asset_count
+                    progress.done_domains.append(result.domain)
                     if result.has_findings:
                         progress.sites_with_findings += 1
+                        progress.broken_domains.append(result.domain)
                     progress.current = result.domain
 
                 run, run_id = await execute_run(

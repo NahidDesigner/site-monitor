@@ -25,13 +25,18 @@
 
 {% if grouped %}
 <div class="card">
-  <h2>Broken stylesheets</h2>
+  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+    <h2 style="margin:0">Broken stylesheets</h2>
+    <span class="spacer"></span>
+    <button class="btn-sm" type="button" data-copy="page">Copy page URLs</button>
+    <button class="btn-sm" type="button" data-copy="asset">Copy CSS URLs</button>
+  </div>
   {% for domain, rows in grouped.items() %}
   <div class="finding">
     <h3>{{ domain }} <span class="pill bad">{{ rows|length }}</span></h3>
     {% for row in rows %}
-      <p class="pg"><a href="{{ row['page_url'] }}" target="_blank" rel="noopener">{{ row['page_url'] }}</a></p>
-      <p class="as">{{ row['asset_url'] }}<br><span class="why">{{ row['reason'] }}</span></p>
+      <p class="pg" data-page-url="{{ row['page_url'] }}"><a href="{{ row['page_url'] }}" target="_blank" rel="noopener">{{ row['page_url'] }}</a></p>
+      <p class="as" data-asset-url="{{ row['asset_url'] }}">{{ row['asset_url'] }}<br><span class="why">{{ row['reason'] }}</span></p>
     {% endfor %}
   </div>
   {% endfor %}

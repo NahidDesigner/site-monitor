@@ -64,6 +64,22 @@ def _parse_pages(raw: str) -> tuple[list[str], list[str]]:
     return good, bad
 
 
+def _same_origin_path(request: Request, fallback: str = "/") -> str:
+    """The page the request came from, if it is one of ours.
+
+    Used to return someone to where they pressed the button. Only a path from
+    this host is accepted -- taking the Referer at face value would be an open
+    redirect.
+    """
+    referer = request.headers.get("referer") or ""
+    if not referer:
+        return fallback
+    parsed = urlparse(referer)
+    if parsed.netloc and parsed.netloc != request.url.netloc:
+        return fallback
+    return parsed.path or fallback
+
+
 def _redirect(path: str, **params) -> RedirectResponse:
     from urllib.parse import urlencode
 
@@ -261,9 +277,14 @@ def create_app(base_settings: Settings) -> FastAPI:
     # ---- triggers ------------------------------------------------------
 
     @app.post("/run")
-    async def trigger_run():
+    async def trigger_run(request: Request):
         started, message = await manager.trigger(trigger="dashboard")
-        return _redirect("/", **({"message": message} if started else {"error": message}))
+        # Back to wherever it was pressed: from the Sites page you want to
+        # watch the rows tick off, not be bounced to the Overview.
+        target = _same_origin_path(request, "/")
+        return _redirect(
+            target, **({"message": message} if started else {"error": message})
+        )
 
     @app.post("/pagespeed/run")
     async def trigger_pagespeed():
@@ -405,7 +426,7 @@ def create_app(base_settings: Settings) -> FastAPI:
         return _redirect("/sites", message=f"Saved {clean_domain}")
 
     @app.post("/sites/{domain}/check")
-    async def site_check(domain: str):
+    async def site_check(request: Request, domain: str):
         """Run a check against one site only — a spot check without waiting
         for, or paying for, the whole fleet."""
         with db() as database:
@@ -415,8 +436,9 @@ def create_app(base_settings: Settings) -> FastAPI:
 
         manager.refresh_settings(current_settings())
         started, message = await manager.trigger(trigger=f"site:{domain}", only=match)
+        target = _same_origin_path(request, "/sites")
         return _redirect(
-            "/sites", **({"message": message} if started else {"error": message})
+            target, **({"message": message} if started else {"error": message})
         )
 
     @app.post("/sites/{domain}/toggle")
