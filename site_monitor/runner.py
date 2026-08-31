@@ -303,14 +303,23 @@ class RunManager:
     # -- PageSpeed ---------------------------------------------------------
 
     async def trigger_pagespeed(
-        self, *, trigger: str = "manual", strategies: tuple[str, ...] | None = None
+        self,
+        *,
+        trigger: str = "manual",
+        strategies: tuple[str, ...] | None = None,
+        only: "list[Site] | None" = None,
     ) -> tuple[bool, str]:
         async with self._ps_lock:
             if self.ps_running:
                 return False, "A PageSpeed sweep is already running."
 
-            with Database(self._settings.database_path) as database:
-                sites = resolve_sites(self._settings, database)
+            if only:
+                # As with a CSS spot check, naming a site is explicit intent
+                # and outranks its paused flag.
+                sites = [replace(site, enabled=True) for site in only]
+            else:
+                with Database(self._settings.database_path) as database:
+                    sites = resolve_sites(self._settings, database)
             if not sites:
                 return False, "No sites are configured yet."
 
@@ -323,6 +332,8 @@ class RunManager:
                 current="starting",
             )
             self._ps_task = asyncio.create_task(self._run_pagespeed(sites, picked))
+            if len(sites) == 1:
+                return True, f"Testing {sites[0].domain} on {' and '.join(picked)}."
             return True, f"Testing {len(sites)} sites."
 
     async def _run_pagespeed(self, sites, strategies) -> None:

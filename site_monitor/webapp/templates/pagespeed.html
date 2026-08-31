@@ -68,6 +68,13 @@
 </div>
 {% endif %}
 
+{% if site_count %}
+<p class="hint" style="margin:-6px 0 14px">
+  {{ tested_count }} of {{ site_count }} configured site{{ '' if site_count == 1 else 's' }}
+  have PageSpeed results{% if tested_count < site_count %} — the rest have never been
+  tested. A full sweep covers every site{% endif %}.</p>
+{% endif %}
+
 <div class="tabs" style="margin-bottom:14px">
   <a href="?view=paired&amp;sort={{ sort }}&amp;dir={{ dir }}{% if domain %}&amp;domain={{ domain }}{% endif %}{% if run_id %}&amp;run_id={{ run_id }}{% endif %}"
      class="{{ 'on' if view == 'paired' }}">Mobile &amp; desktop</a>
@@ -80,7 +87,11 @@
     <label for="f-domain">Site</label>
     <select id="f-domain" name="domain">
       <option value="">All sites</option>
-      {% for d in domains %}<option value="{{ d }}" {{ 'selected' if d==domain }}>{{ d }}</option>{% endfor %}
+      {% for d in domains %}
+        <option value="{{ d.domain }}" {{ 'selected' if d.domain == domain }}>
+          {{ d.domain }}{% if not d.tested %} — not tested yet{% endif %}
+        </option>
+      {% endfor %}
     </select>
   </div>
   <div style="flex:1;min-width:140px">
@@ -153,8 +164,15 @@
      move slightly from the snapshot above.</p>
   {% else %}
   <div class="card empty">
-    <p>No PageSpeed results yet.</p>
-    <form method="post" action="/pagespeed/run"><button class="btn-primary" type="submit">Run the first test</button></form>
+    {% if domain %}
+      <p>No PageSpeed results for <strong>{{ domain }}</strong> yet.</p>
+      <a class="btn" href="/pagespeed">Show all sites</a>
+      <form method="post" action="/pagespeed/run" style="display:inline">
+        <button class="btn-primary" type="submit">Test every site now</button></form>
+    {% else %}
+      <p>No PageSpeed results yet.</p>
+      <form method="post" action="/pagespeed/run"><button class="btn-primary" type="submit">Run the first test</button></form>
+    {% endif %}
   </div>
   {% endif %}
 

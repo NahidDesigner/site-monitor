@@ -31,7 +31,10 @@
       </td>
       <td style="text-align:right;white-space:nowrap">
         <form method="post" action="/sites/{{ site.domain }}/check" style="display:inline">
-          <button class="btn-sm" type="submit" title="Check just this site now">Check</button>
+          <button class="btn-sm" type="submit" title="Check this site's Elementor CSS now">Check</button>
+        </form>
+        <form method="post" action="/sites/{{ site.domain }}/pagespeed" style="display:inline">
+          <button class="btn-sm" type="submit" title="Run a PageSpeed test on this site">Speed</button>
         </form>
         <form method="post" action="/sites/{{ site.domain }}/toggle" style="display:inline">
           <button class="btn-sm" type="submit">{{ 'Pause' if site.enabled else 'Resume' }}</button>

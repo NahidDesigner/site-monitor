@@ -455,6 +455,23 @@ def create_app(base_settings: Settings) -> FastAPI:
             target, **({"message": message} if started else {"error": message})
         )
 
+    @app.post("/sites/{domain}/pagespeed")
+    async def site_pagespeed(request: Request, domain: str):
+        """Run a PageSpeed test against one site, without sweeping the fleet."""
+        with db() as database:
+            match = [s for s in database.list_sites() if s.domain == domain]
+        if not match:
+            return _redirect("/sites", error=f"No site called {domain}")
+
+        manager.refresh_settings(current_settings())
+        started, message = await manager.trigger_pagespeed(
+            trigger=f"site:{domain}", only=match
+        )
+        target = _same_origin_path(request, "/sites")
+        return _redirect(
+            target, **({"message": message} if started else {"error": message})
+        )
+
     @app.post("/sites/{domain}/toggle")
     async def site_toggle(domain: str):
         with db() as database:
@@ -537,6 +554,21 @@ def create_app(base_settings: Settings) -> FastAPI:
                 direction=dir,
                 limit=1000,
             )
+            # Every configured site belongs in the filter, not just the ones
+            # that happen to have results -- otherwise a site that has never
+            # been tested is invisible, which is the thing worth noticing.
+            tested = set(database.pagespeed_domains())
+            configured = [site.domain for site in database.list_sites()]
+            domains = [
+                {"domain": name, "tested": name in tested} for name in configured
+            ]
+            # Anything with results but no longer configured still gets listed,
+            # so its history stays reachable.
+            domains += [
+                {"domain": name, "tested": True}
+                for name in sorted(tested - set(configured))
+            ]
+
             return render(
                 request,
                 "pagespeed.html",
@@ -546,7 +578,9 @@ def create_app(base_settings: Settings) -> FastAPI:
                 view="flat" if view == "flat" else "paired",
                 missing=[p for p in pairs if not p["mobile"] or not p["desktop"]],
                 runs=database.pagespeed_runs(30),
-                domains=database.pagespeed_domains(),
+                domains=domains,
+                tested_count=len(tested & set(configured)),
+                site_count=len(configured),
                 sort=sort,
                 dir=dir,
                 domain=domain,

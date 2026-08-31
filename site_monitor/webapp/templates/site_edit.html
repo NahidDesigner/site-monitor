@@ -12,7 +12,10 @@
   <span class="spacer"></span>
   {% if site %}
   <form method="post" action="/sites/{{ site.domain }}/check" style="display:inline">
-    <button class="btn-primary" type="submit">Check this site now</button>
+    <button class="btn-primary" type="submit">Check CSS now</button>
+  </form>
+  <form method="post" action="/sites/{{ site.domain }}/pagespeed" style="display:inline">
+    <button type="submit">Speed test</button>
   </form>
   {% endif %}
   <a class="btn" href="/sites">Back to sites</a>

@@ -454,11 +454,16 @@ def test_checking_an_unknown_site_reports_it(signed_in):
     assert "error=" in response.headers["location"]
 
 
-def test_the_sites_list_offers_a_per_site_check(signed_in):
+def test_the_sites_list_offers_a_per_site_check_and_speed_test(signed_in):
     signed_in.post("/sites/save", data={"domain": "a.com", "pages": "https://a.com/"})
 
-    assert "/sites/a.com/check" in signed_in.get("/sites").text
-    assert "Check this site now" in signed_in.get("/sites/edit/a.com").text
+    listing = signed_in.get("/sites").text
+    assert "/sites/a.com/check" in listing
+    assert "/sites/a.com/pagespeed" in listing
+
+    editor = signed_in.get("/sites/edit/a.com").text
+    assert "Check CSS now" in editor
+    assert "Speed test" in editor
 
 
 # -- returning to where a button was pressed ----------------------------------
@@ -642,3 +647,92 @@ def test_the_download_follows_the_selected_tab(signed_in, mixed_runs):
 
     assert len(everything.splitlines()) == 5   # header + 4
     assert len(spot_only.splitlines()) == 2    # header + 1
+
+
+# -- the PageSpeed site filter ------------------------------------------------
+
+
+@pytest.fixture
+def sites_with_partial_pagespeed(database):
+    """Four configured sites; only one has ever been tested."""
+    from site_monitor.pagespeed import PageSpeedResult
+
+    for name in ("tested.com", "never1.com", "never2.com", "never3.com"):
+        database.upsert_site(domain=name, pages=[f"https://{name}/"])
+    run_id = database.start_pagespeed_run()
+    database.record_pagespeed_result(
+        run_id,
+        PageSpeedResult(domain="tested.com", url="https://tested.com/",
+                        strategy="mobile", performance=61.0),
+    )
+    return database
+
+
+def test_the_filter_lists_every_configured_site(signed_in, sites_with_partial_pagespeed):
+    """Not just the ones that happen to have results already."""
+    body = signed_in.get("/pagespeed").text
+
+    for name in ("tested.com", "never1.com", "never2.com", "never3.com"):
+        assert f'value="{name}"' in body
+
+
+def test_untested_sites_are_labelled_as_such(signed_in, sites_with_partial_pagespeed):
+    body = signed_in.get("/pagespeed").text
+
+    assert "not tested yet" in body
+
+
+def test_coverage_is_stated(signed_in, sites_with_partial_pagespeed):
+    body = signed_in.get("/pagespeed").text
+
+    assert "1 of 4 configured sites" in body
+
+
+def test_a_site_with_results_but_no_longer_configured_stays_reachable(signed_in, database):
+    """Its history should not vanish because the site was removed."""
+    from site_monitor.pagespeed import PageSpeedResult
+
+    run_id = database.start_pagespeed_run()
+    database.record_pagespeed_result(
+        run_id,
+        PageSpeedResult(domain="removed.com", url="https://removed.com/",
+                        strategy="mobile", performance=40.0),
+    )
+
+    assert 'value="removed.com"' in signed_in.get("/pagespeed").text
+
+
+def test_selecting_an_untested_site_explains_the_empty_result(
+    signed_in, sites_with_partial_pagespeed
+):
+    body = signed_in.get("/pagespeed?domain=never1.com").text
+
+    assert "No PageSpeed results for" in body
+    assert "never1.com" in body
+    assert "Test every site now" in body
+
+
+def test_a_speed_test_can_be_scoped_to_one_site(signed_in, database, monkeypatch):
+    signed_in.post("/sites/save", data={"domain": "a.com", "pages": "https://a.com/"})
+    signed_in.post("/sites/save", data={"domain": "b.com", "pages": "https://b.com/"})
+
+    scoped: list = []
+
+    async def fake(self, *, trigger="manual", strategies=None, only=None):
+        scoped.append([s.domain for s in (only or [])])
+        return True, "started"
+
+    from site_monitor.runner import RunManager
+
+    monkeypatch.setattr(RunManager, "trigger_pagespeed", fake)
+
+    response = signed_in.post("/sites/b.com/pagespeed", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert scoped == [["b.com"]]
+
+
+def test_a_speed_test_on_an_unknown_site_is_reported(signed_in):
+    response = signed_in.post("/sites/nope.com/pagespeed", follow_redirects=False)
+
+    assert "error=" in response.headers["location"]

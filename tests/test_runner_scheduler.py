@@ -351,3 +351,18 @@ def test_scope_names_one_site_but_counts_many():
 
     assert describe_scope([Site(domain="a.com")]) == "a.com"
     assert describe_scope([Site(domain="a.com"), Site(domain="b.com")]) == "2 sites"
+
+
+async def test_a_scoped_speed_test_covers_only_that_site(tmp_path):
+    with Database(tmp_path / "run.db") as database:
+        database.upsert_site(domain="a.com", pages=["https://a.com/"])
+        database.upsert_site(domain="b.com", pages=["https://b.com/"], enabled=False)
+        only = [s for s in database.list_sites() if s.domain == "b.com"]
+
+    manager = RunManager(settings_for(tmp_path))
+    started, message = await manager.trigger_pagespeed(only=only)
+
+    assert started
+    assert "b.com" in message          # names the site, not a count
+    assert manager.ps_progress.total == 2   # one site, two devices
+    await manager._ps_task
