@@ -312,10 +312,17 @@ def create_app(base_settings: Settings) -> FastAPI:
     # ---- runs ----------------------------------------------------------
 
     @app.get("/runs", response_class=HTMLResponse)
-    async def runs(request: Request):
+    async def runs(request: Request, source: str = Query("all")):
+        if source not in {"all", *Database.SOURCE_FILTERS}:
+            source = "all"
         with db() as database:
             return render(
-                request, "runs.html", active="runs", runs=database.recent_runs(60)
+                request,
+                "runs.html",
+                active="runs",
+                runs=database.runs_by_source(source, limit=100),
+                counts=database.run_source_counts(),
+                source=source,
             )
 
     @app.get("/runs/{run_id}", response_class=HTMLResponse)
@@ -733,6 +740,7 @@ def create_app(base_settings: Settings) -> FastAPI:
         strategy: str = Query(""),
         sort: str = Query("tested_at"),
         dir: str = Query("desc"),
+        source: str = Query("all"),
     ):
         if fmt not in {"csv", "xlsx"}:
             return JSONResponse({"error": "unknown format"}, status_code=404)
@@ -758,7 +766,8 @@ def create_app(base_settings: Settings) -> FastAPI:
                     )
                 columns, title = BROKEN_COLUMNS, "Broken CSS"
             elif report == "runs":
-                rows = database.recent_runs(500)
+                # Respect whichever tab the download was started from.
+                rows = database.runs_by_source(source or "all", limit=1000)
                 columns, title = RUNS_COLUMNS, "Runs"
             else:
                 return JSONResponse({"error": "unknown report"}, status_code=404)

@@ -718,6 +718,37 @@ class Database:
 
     # -- reads -------------------------------------------------------------
 
+    # How a run's stored trigger maps to the tabs on the reports page.
+    # "manual" is the catch-all: it also covers runs recorded before triggers
+    # were stored at all, which is the honest place to put them.
+    SOURCE_FILTERS = {
+        "scheduled": "trigger LIKE 'schedule:%'",
+        "spot": "trigger LIKE 'site:%'",
+        "manual": "trigger NOT LIKE 'schedule:%' AND trigger NOT LIKE 'site:%'",
+    }
+
+    def runs_by_source(self, source: str = "all", limit: int = 60) -> list[sqlite3.Row]:
+        clause = self.SOURCE_FILTERS.get(source)
+        where = f" WHERE {clause}" if clause else ""
+        return list(
+            self._conn.execute(
+                f"SELECT * FROM runs{where} ORDER BY id DESC LIMIT ?", (limit,)
+            )
+        )
+
+    def run_source_counts(self) -> dict[str, int]:
+        """How many runs sit behind each tab."""
+        counts = {
+            "all": int(self._conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0])
+        }
+        for name, clause in self.SOURCE_FILTERS.items():
+            counts[name] = int(
+                self._conn.execute(
+                    f"SELECT COUNT(*) FROM runs WHERE {clause}"
+                ).fetchone()[0]
+            )
+        return counts
+
     def recent_runs(self, limit: int = 10) -> list[sqlite3.Row]:
         return list(
             self._conn.execute(

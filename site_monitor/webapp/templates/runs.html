@@ -1,26 +1,47 @@
 {% extends "base.html" %}
-{% from "_macros.html" import banner, ago, source, runstate, site_of %}
+{% from "_macros.html" import banner, ago, source as src_of, runstate, site_of %}
 {% block title %}Reports · Site Monitor{% endblock %}
 {% block body %}
 {{ banner(request.query_params.get('message'), request.query_params.get('error')) }}
+{% set tabs = [
+  ('all',       'All checks'),
+  ('scheduled', 'Scheduled'),
+  ('manual',    'Manual'),
+  ('spot',      'Spot checks'),
+] %}
+
 <div class="head">
-  <div><h1>Reports</h1><p>Every Elementor CSS check, newest first</p></div>
+  <div>
+    <h1>Reports</h1>
+    <p>{% if source == 'scheduled' %}Checks the app ran on a schedule
+       {%- elif source == 'manual' %}Checks you started with the button
+       {%- elif source == 'spot' %}Single-site checks
+       {%- else %}Every Elementor CSS check{% endif %}, newest first</p>
+  </div>
   <span class="spacer"></span>
-  <a class="btn btn-sm" href="/export/runs.csv">Download CSV</a>
-  <a class="btn btn-sm" href="/export/runs.xlsx">Download Excel</a>
+  <a class="btn btn-sm" href="/export/runs.csv?source={{ source }}">Download CSV</a>
+  <a class="btn btn-sm" href="/export/runs.xlsx?source={{ source }}">Download Excel</a>
+</div>
+
+<div class="tabs">
+  {% for key, label in tabs %}
+    <a href="/runs?source={{ key }}" class="{{ 'on' if source == key }}">
+      {{ label }}<span class="count">{{ counts.get(key, 0) }}</span>
+    </a>
+  {% endfor %}
 </div>
 
 {% if runs %}
 <div class="card" style="padding:0">
   <div class="tablewrap"><table>
-    <tr><th>Started</th><th>Website</th><th>Source</th><th>Status</th>
+    <tr><th>Started</th><th>Website</th>{% if source == 'all' %}<th>Source</th>{% endif %}<th>Status</th>
         <th class="num">Pages</th><th class="num">Stylesheets</th>
         <th class="num">Broken</th><th></th></tr>
     {% for row in runs %}
     <tr>
       <td>{{ ago(row['started_at']) }}</td>
       <td>{{ site_of(row['trigger'] or '', row['scope'] or '', row['sites_checked']) }}</td>
-      <td style="white-space:nowrap">{{ source(row['trigger'] or '', row['scope'] or '') }}</td>
+      {% if source == 'all' %}<td style="white-space:nowrap">{{ src_of(row['trigger'] or '', row['scope'] or '') }}</td>{% endif %}
       <td>{{ runstate(row['status']) }}</td>
       <td class="num">{{ '{:,}'.format(row['pages_checked']) }}</td>
       <td class="num">{{ '{:,}'.format(row['assets_checked']) }}</td>
@@ -32,6 +53,13 @@
   </table></div>
 </div>
 {% else %}
-<div class="card empty"><p>No checks have run yet.</p></div>
+<div class="card empty">
+  <p>{% if source == 'scheduled' %}No scheduled checks have run yet.
+     {%- elif source == 'manual' %}You have not started a check with the button yet.
+     {%- elif source == 'spot' %}No single-site checks yet — press Check on any row in Sites.
+     {%- else %}No checks have run yet.{% endif %}</p>
+  {% if source == 'scheduled' %}<a class="btn btn-primary" href="/schedules">Add a schedule</a>
+  {% elif source == 'spot' %}<a class="btn" href="/sites">Go to Sites</a>{% endif %}
+</div>
 {% endif %}
 {% endblock %}

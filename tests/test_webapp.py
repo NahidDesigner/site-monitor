@@ -573,3 +573,72 @@ def test_the_form_offers_plain_language_options(signed_in):
     assert "Every 6 hours" in body
     assert "Every day at 3:00am" in body
     assert "Custom schedule" in body
+
+
+# -- report tabs --------------------------------------------------------------
+
+
+@pytest.fixture
+def mixed_runs(database):
+    database.start_run(trigger="schedule:Nightly", scope="53 sites")
+    database.start_run(trigger="dashboard", scope="53 sites")
+    database.start_run(trigger="site:dvlfirm.com", scope="dvlfirm.com")
+    database.start_run(trigger="", scope="")  # predates trigger recording
+    return database
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [("all", 4), ("scheduled", 1), ("manual", 2), ("spot", 1)],
+)
+def test_each_tab_filters_to_its_own_runs(mixed_runs, source, expected):
+    assert len(mixed_runs.runs_by_source(source)) == expected
+
+
+def test_runs_from_before_triggers_were_recorded_land_under_manual(mixed_runs):
+    """They have to appear somewhere; manual is the honest place."""
+    triggers = [row["trigger"] for row in mixed_runs.runs_by_source("manual")]
+
+    assert "" in triggers
+
+
+def test_tab_counts_are_reported(mixed_runs):
+    counts = mixed_runs.run_source_counts()
+
+    assert counts == {"all": 4, "scheduled": 1, "manual": 2, "spot": 1}
+
+
+def test_the_tabs_render_with_counts(signed_in, mixed_runs):
+    body = signed_in.get("/runs").text
+
+    assert "Spot checks" in body
+    assert "/runs?source=scheduled" in body
+
+
+def test_an_unknown_tab_falls_back_to_all(signed_in, mixed_runs):
+    response = signed_in.get("/runs?source=../../etc/passwd")
+
+    assert response.status_code == 200
+    assert "All checks" in response.text
+
+
+def test_a_filtered_tab_shows_only_its_runs(signed_in, mixed_runs):
+    body = signed_in.get("/runs?source=spot").text
+
+    assert "dvlfirm.com" in body
+    assert "Nightly" not in body
+
+
+def test_an_empty_tab_says_what_would_fill_it(signed_in, database):
+    body = signed_in.get("/runs?source=scheduled").text
+
+    assert "No scheduled checks" in body
+    assert "/schedules" in body
+
+
+def test_the_download_follows_the_selected_tab(signed_in, mixed_runs):
+    everything = signed_in.get("/export/runs.csv?source=all").text
+    spot_only = signed_in.get("/export/runs.csv?source=spot").text
+
+    assert len(everything.splitlines()) == 5   # header + 4
+    assert len(spot_only.splitlines()) == 2    # header + 1
