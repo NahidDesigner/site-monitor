@@ -1,11 +1,17 @@
 httpx>=0.27,<1.0
-# Brotli is what makes httpx able to DECODE `content-encoding: br`.
-# Without it, every Brotli response (i.e. most of Cloudflare) arrives as
-# binary in response.text and every regex over the page silently matches
-# nothing. Not optional: it is a correctness dependency, not a nicety.
 brotli>=1.1
 PyYAML>=6.0
 python-dotenv>=1.0
+
+# brotli is a correctness dependency, not an optimisation. It is what lets
+# httpx decode a Brotli response body. Without it, such a body reaches
+# response.text as raw binary, every regex over the page matches nothing, and
+# every Cloudflare-fronted site reports zero stylesheets and a clean result.
+#
+# Careful with comments in the first two lines of this file: pip sniffs them
+# for a PEP 263 marker and will try to decode the whole file with whatever
+# token follows. A comment mentioning an HTTP content encoding up there broke
+# the image build once already.
 
 # Dashboard
 fastapi>=0.110
