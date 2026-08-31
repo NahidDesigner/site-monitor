@@ -370,3 +370,38 @@ def test_hosts_can_be_pinned(tmp_path):
     with TestClient(create_app(pinned)) as client:
         assert _initialize(client, "bosseo.vibecodingfield.com").status_code == 200
         assert _initialize(client, "attacker.example.com").status_code == 421
+
+
+def test_mcp_works_without_a_trailing_slash(settings):
+    """A client configured with /mcp must not be sent on a redirect: some do not
+    follow one on POST, some drop the Authorization header across it, and behind
+    a TLS-terminating proxy the redirect points at http://."""
+    with TestClient(create_app(settings), follow_redirects=False) as client:
+        response = client.post(
+            "/mcp",
+            headers={
+                "Host": "bosseo.vibecodingfield.com",
+                "Authorization": f"Bearer {TOKEN}",
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream",
+            },
+            json={
+                "jsonrpc": "2.0", "id": 1, "method": "initialize",
+                "params": {"protocolVersion": "2025-06-18", "capabilities": {},
+                           "clientInfo": {"name": "t", "version": "1"}},
+            },
+        )
+
+    assert response.status_code == 200, f"expected 200, got {response.status_code}"
+    assert response.json()["result"]["serverInfo"]["name"] == "site-monitor"
+
+
+def test_the_slashless_path_is_still_authenticated(settings):
+    with TestClient(create_app(settings), follow_redirects=False) as client:
+        response = client.post(
+            "/mcp",
+            headers={"Accept": "application/json, text/event-stream"},
+            json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+        )
+
+    assert response.status_code == 401

@@ -234,6 +234,22 @@ def create_app(base_settings: Settings) -> FastAPI:
     # ---- auth ----------------------------------------------------------
 
     @app.middleware("http")
+    async def accept_mcp_without_a_trailing_slash(request: Request, call_next):
+        """Serve /mcp as well as /mcp/.
+
+        The transport lives at /mcp/ and a mount would answer /mcp with a 307.
+        Clients configured with the shorter URL either do not follow a redirect
+        on POST or drop the Authorization header across it, and the redirect is
+        built from the request the app received -- which behind a TLS-terminating
+        proxy means http://, pointing a client at a downgraded connection.
+        Rewriting the path before routing means no redirect is ever issued.
+        """
+        if request.scope.get("path") == "/mcp":
+            request.scope["path"] = "/mcp/"
+            request.scope["raw_path"] = b"/mcp/"
+        return await call_next(request)
+
+    @app.middleware("http")
     async def no_caching(request: Request, call_next):
         """Tell every cache in front of us not to keep any of this.
 
