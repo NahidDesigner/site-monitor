@@ -1,0 +1,185 @@
+{# A PageSpeed result a client can be sent.
+
+   Deliberately not extending base.html: whoever opens this has no account
+   here and should not be shown a dashboard nav or a Sign out button.
+
+   The claim this page makes is narrow and exact -- these numbers were
+   measured at this timestamp, by Google's PageSpeed Insights API, for this
+   URL. It never implies Google is hosting the page, and it offers the raw
+   Lighthouse report so the reader can check it in Google's own viewer
+   instead of taking the numbers on trust. #}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Speed report · {{ row['domain'] }}</title>
+<style>
+:root{
+  --paper:#F4F5F7; --surface:#FFFFFF; --ink:#16202B; --ink-soft:#4A5765;
+  --ink-faint:#7C8894; --rule:#DDE1E6;
+  --ok:#3E7263; --ok-wash:#E6F0EC; --warn:#8A6410; --warn-wash:#F8EFDC;
+  --bad:#A3342F; --bad-wash:#F8E7E5; --accent:#A85434;
+  --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+  --sans:system-ui,-apple-system,'Segoe UI',sans-serif;
+}
+@media (prefers-color-scheme:dark){:root{
+  --paper:#0F1720; --surface:#16202B; --ink:#E6EAEE; --ink-soft:#A6B2BE;
+  --ink-faint:#74818E; --rule:#263341;
+  --ok:#6FAE9A; --ok-wash:#16261F; --warn:#C9A24A; --warn-wash:#241D0F;
+  --bad:#E0796F; --bad-wash:#2B1817; --accent:#D98661;
+}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);
+  font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+.wrap{max-width:760px;margin:0 auto;padding:38px 20px 70px}
+h1{font-size:1.5rem;font-weight:700;letter-spacing:-.02em;margin:0 0 6px}
+h2{font-size:.95rem;font-weight:600;margin:0 0 14px}
+a{color:var(--accent)}
+.sub{color:var(--ink-soft);font-size:13.5px;margin:0 0 26px}
+.sub .u{font-family:var(--mono);font-size:12.5px;word-break:break-all}
+.card{background:var(--surface);border:1px solid var(--rule);border-radius:9px;
+  padding:22px;margin-bottom:16px}
+.scores{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:16px}
+.s{text-align:center}
+.s .n{font-size:3.1rem;font-weight:700;letter-spacing:-.04em;line-height:1;
+  font-variant-numeric:tabular-nums}
+.s .d{font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--ink-faint);margin-top:9px}
+.good{color:var(--ok)} .avg{color:var(--warn)} .poor{color:var(--bad)}
+table{width:100%;border-collapse:collapse;font-size:13.5px;margin-top:4px}
+th{text-align:left;font-size:10.5px;font-weight:600;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--ink-faint);padding:8px 10px;
+  border-bottom:1px solid var(--rule)}
+td{padding:9px 10px;border-bottom:1px solid var(--rule)}
+tr:last-child td{border-bottom:none}
+td.n{font-family:var(--mono);text-align:right;font-variant-numeric:tabular-nums}
+.tag{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.05em;
+  padding:2px 7px;border-radius:4px;text-transform:uppercase}
+.tag.good{background:var(--ok-wash)} .tag.avg{background:var(--warn-wash)}
+.tag.poor{background:var(--bad-wash)}
+.btn{display:inline-block;font-size:13px;font-weight:600;text-decoration:none;
+  padding:9px 15px;border-radius:6px;border:1px solid var(--rule);
+  color:var(--ink);background:var(--surface)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.note{font-size:12.5px;color:var(--ink-faint);margin:14px 0 0}
+.foot{font-size:12px;color:var(--ink-faint);text-align:center;margin-top:30px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Website speed report</h1>
+  <p class="sub">
+    <strong>{{ row['domain'] }}</strong><br>
+    <span class="u">{{ row['url'] }}</span><br>
+    Measured {{ row['tested_at']|local('%d %B %Y at %H:%M') }}
+    using Google PageSpeed Insights.
+  </p>
+
+  {# ---- the headline numbers ---- #}
+  <div class="card">
+    <div class="scores">
+      {% for label, entry in [('Mobile', mobile), ('Desktop', desktop)] %}
+      <div class="s">
+        {% if entry and entry['performance'] is not none %}
+          {% set v = entry['performance'] %}
+          <div class="n {{ 'good' if v >= 90 else ('avg' if v >= 50 else 'poor') }}">{{ v|round|int }}</div>
+        {% else %}
+          <div class="n" style="color:var(--ink-faint)">—</div>
+        {% endif %}
+        <div class="d">{{ label }} performance</div>
+      </div>
+      {% endfor %}
+    </div>
+    <p class="note">Google scores performance from 0 to 100.
+       90 and above is rated good, 50–89 needs improvement, below 50 is poor.
+       Mobile is scored on a deliberately throttled connection, so it is
+       normally the lower of the two.</p>
+  </div>
+
+  {# ---- the metrics behind them ---- #}
+  <div class="card">
+    <h2>Core Web Vitals</h2>
+    <table>
+      <tr><th>Metric</th><th style="text-align:right">Mobile</th>
+          <th style="text-align:right">Desktop</th><th>Google's target</th></tr>
+      {# Colour each value against the target beside it, so a reader who does
+         not know what 7.5s means can still see that it is not good. #}
+      {% macro cell(entry, key, kind, target) -%}
+        {%- if entry and entry[key] is not none -%}
+          {%- set raw = entry[key] -%}
+          <span class="{{ 'good' if raw <= target else 'poor' }}">
+          {%- if kind == 'cls' -%}
+            {{ '%.3f'|format(raw) }}
+          {%- else -%}
+            {{ '%.1f'|format(raw / 1000) }}s
+          {%- endif -%}
+          </span>
+        {%- else -%}—{%- endif -%}
+      {%- endmacro %}
+      <tr>
+        <td>Largest Contentful Paint<br><span class="note">when the main content appears</span></td>
+        <td class="n">{{ cell(mobile, 'lcp_ms', 'ms', 2500) }}</td>
+        <td class="n">{{ cell(desktop, 'lcp_ms', 'ms', 2500) }}</td>
+        <td>under 2.5s</td>
+      </tr>
+      <tr>
+        <td>Cumulative Layout Shift<br><span class="note">how much the page moves while loading</span></td>
+        <td class="n">{{ cell(mobile, 'cls', 'cls', 0.1) }}</td>
+        <td class="n">{{ cell(desktop, 'cls', 'cls', 0.1) }}</td>
+        <td>under 0.1</td>
+      </tr>
+      <tr>
+        <td>Total Blocking Time<br><span class="note">how long the page is unresponsive</span></td>
+        <td class="n">{{ cell(mobile, 'tbt_ms', 'ms', 200) }}</td>
+        <td class="n">{{ cell(desktop, 'tbt_ms', 'ms', 200) }}</td>
+        <td>under 0.2s</td>
+      </tr>
+      <tr>
+        <td>First Contentful Paint<br><span class="note">when anything first appears</span></td>
+        <td class="n">{{ cell(mobile, 'fcp_ms', 'ms', 1800) }}</td>
+        <td class="n">{{ cell(desktop, 'fcp_ms', 'ms', 1800) }}</td>
+        <td>under 1.8s</td>
+      </tr>
+      <tr>
+        <td>Speed Index<br><span class="note">how quickly the page fills in</span></td>
+        <td class="n">{{ cell(mobile, 'speed_index', 'ms', 3400) }}</td>
+        <td class="n">{{ cell(desktop, 'speed_index', 'ms', 3400) }}</td>
+        <td>under 3.4s</td>
+      </tr>
+    </table>
+  </div>
+
+  {# ---- how to check it independently ---- #}
+  <div class="card">
+    <h2>Verify these numbers yourself</h2>
+    {% if has_lighthouse %}
+    <p style="margin-top:0;font-size:13.5px;color:var(--ink-soft)">
+      This is the complete report Google produced for the test above. Download
+      it and open it in Google's Lighthouse Viewer — Google's own tool will
+      render the full official report, including the time it was taken.
+    </p>
+    <p>
+      <a class="btn primary" href="/share/speed/{{ token }}/lighthouse.json">Download the Google report</a>
+      <a class="btn" href="https://googlechrome.github.io/lighthouse/viewer/" target="_blank" rel="noopener">Open Google's viewer</a>
+    </p>
+    {% endif %}
+    <p class="note" style="margin-top:{{ '14px' if has_lighthouse else '0' }}">
+      You can also
+      <a href="{{ row['report_url'] }}" target="_blank" rel="noopener">run a new test on pagespeed.web.dev</a>.
+      That measures the site again, right now, so the score will differ from
+      the one above — Google's results vary between runs, and the site may
+      have changed since {{ row['tested_at']|local('%d %B %Y') }}.
+    </p>
+  </div>
+
+  <p class="foot">
+    Measured with the Google PageSpeed Insights API on
+    {{ row['tested_at']|local('%d %B %Y at %H:%M') }}.
+    This page is a record of that test, not a live measurement.
+  </p>
+</div>
+</body>
+</html>

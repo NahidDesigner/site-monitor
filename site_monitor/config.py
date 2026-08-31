@@ -102,6 +102,10 @@ class Settings:
     # A full Lighthouse audit takes 20-40s per URL, so this decides whether a
     # 53-site sweep takes 5 minutes or 30. Raise it only with an API key.
     pagespeed_concurrency: int = 2
+    # How many Lighthouse reports to keep per URL and device. Older ones
+    # keep their scores and their share links; only the downloadable
+    # attachment is dropped. 0 keeps every report.
+    pagespeed_keep_reports: int = 5
 
     timezone: str = "UTC"
 
@@ -145,6 +149,7 @@ class Settings:
             dry_run=_env_bool("DRY_RUN", False),
             pagespeed_api_key=os.getenv("PAGESPEED_API_KEY") or None,
             pagespeed_concurrency=_env_int("PAGESPEED_CONCURRENCY", 2),
+            pagespeed_keep_reports=_env_int("PAGESPEED_KEEP_REPORTS", 5),
             timezone=os.getenv("TIMEZONE", "UTC"),
             mcp_token=os.getenv("MCP_TOKEN") or None,
             mcp_allowed_hosts=tuple(
@@ -258,6 +263,7 @@ _OVERRIDE_CASTS = {
     "max_pages_per_site": int,
     "request_timeout": float,
     "pagespeed_concurrency": int,
+    "pagespeed_keep_reports": int,
 }
 
 

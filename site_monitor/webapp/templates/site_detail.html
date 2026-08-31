@@ -138,7 +138,7 @@
   <div class="tablewrap"><table>
     <tr><th>Page</th><th>Tested</th>
         <th class="num">Mobile</th><th class="num">Desktop</th>
-        <th class="num">LCP</th><th>Share</th></tr>
+        <th class="num">LCP</th><th>Report</th></tr>
     {% for row in speed %}
     {% set m = row['mobile'] %}{% set d = row['desktop'] %}
     <tr>
@@ -149,8 +149,11 @@
       <td class="num">{% if d %}{{ score(d['performance']) }}{% else %}<span class="pill off">—</span>{% endif %}</td>
       <td class="num">{{ ms(m['lcp_ms']) if m else (ms(d['lcp_ms']) if d else '—') }}</td>
       <td style="white-space:nowrap">
-        {% if m and m['report_url'] %}<a class="btn btn-sm" href="{{ m['report_url'] }}" target="_blank" rel="noopener">Mobile</a>{% endif %}
-        {% if d and d['report_url'] %}<a class="btn btn-sm" href="{{ d['report_url'] }}" target="_blank" rel="noopener">Desktop</a>{% endif %}
+        {% set share = (m and m['share_token']) or (d and d['share_token']) %}
+        {% if share %}
+          <a class="btn btn-sm btn-primary" href="/share/speed/{{ share }}"
+             target="_blank" rel="noopener">Send to client</a>
+        {% endif %}
       </td>
     </tr>
     {% endfor %}

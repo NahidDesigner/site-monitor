@@ -307,6 +307,9 @@ def create_app(base_settings: Settings) -> FastAPI:
 
     @app.middleware("http")
     async def require_login(request: Request, call_next):
+        if request.url.path.startswith("/share/"):
+            return await call_next(request)
+
         if request.url.path in {"/login", "/healthz"}:
             return await call_next(request)
 
@@ -742,6 +745,72 @@ def create_app(base_settings: Settings) -> FastAPI:
         return _redirect("/sites", message=f"Imported {count} sites")
 
     # ---- pagespeed -----------------------------------------------------
+
+    # ---- public: a report a client can open --------------------------------
+
+    @app.get("/share/speed/{token}", response_class=HTMLResponse)
+    async def shared_speed_report(request: Request, token: str):
+        """One measured PageSpeed result, readable without an account.
+
+        This exists because Google's API hands back no permalink for a run it
+        performed. The numbers here are the ones recorded at the timestamp
+        shown, not a fresh audit that would read differently.
+        """
+        with db() as database:
+            row = database.pagespeed_result_by_token(token)
+            if row is None:
+                return Response(
+                    "This report link is not valid.",
+                    status_code=404,
+                    media_type="text/plain",
+                )
+            sibling = database.pagespeed_sibling(row)
+
+        mobile = row if row["strategy"] == "mobile" else sibling
+        desktop = row if row["strategy"] == "desktop" else sibling
+        return render(
+            request,
+            "share_speed.html",
+            public=True,
+            token=token,
+            row=row,
+            mobile=mobile,
+            desktop=desktop,
+            has_lighthouse=row["report_json"] is not None,
+        )
+
+    @app.get("/share/speed/{token}/lighthouse.json")
+    async def shared_lighthouse_json(token: str):
+        """Google's own Lighthouse report, exactly as it was returned.
+
+        Downloadable so it can be opened in Google's Lighthouse Viewer, which
+        renders it back into the official report. That makes the measurement
+        independently checkable rather than a number on a page someone made.
+        """
+        from ..db import unpack_report
+
+        with db() as database:
+            row = database.pagespeed_result_by_token(token)
+            if row is None or row["report_json"] is None:
+                return Response(
+                    "No stored Lighthouse report for this link.",
+                    status_code=404,
+                    media_type="text/plain",
+                )
+            report = unpack_report(row["report_json"])
+
+        if report is None:
+            return Response(
+                "The stored report could not be read.",
+                status_code=410,
+                media_type="text/plain",
+            )
+        stamp = (row["tested_at"] or "")[:10]
+        name = f"lighthouse-{row['domain']}-{row['strategy']}-{stamp}.json"
+        return JSONResponse(
+            report,
+            headers={"Content-Disposition": f'attachment; filename="{name}"'},
+        )
 
     @app.get("/pagespeed", response_class=HTMLResponse)
     async def pagespeed(

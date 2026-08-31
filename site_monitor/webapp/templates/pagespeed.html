@@ -130,7 +130,7 @@
         <th class="num">Desktop</th>
         <th class="num">{{ sortlink('lcp', 'LCP') }}</th>
         <th class="num">{{ sortlink('cls', 'CLS') }}</th>
-        <th>Share</th>
+        <th>Report</th>
         <th>{{ sortlink('tested_at', 'Tested') }}</th>
       </tr>
       {% for row in pairs %}
@@ -145,8 +145,14 @@
         <td class="num">{% if m %}{{ m['cls'] if m['cls'] is not none else '—' }}
             {%- elif d %}{{ d['cls'] if d['cls'] is not none else '—' }}{% else %}—{% endif %}</td>
         <td style="white-space:nowrap">
-          {% if m and m['report_url'] %}<a class="btn btn-sm" href="{{ m['report_url'] }}" target="_blank" rel="noopener">Mobile</a>{% endif %}
-          {% if d and d['report_url'] %}<a class="btn btn-sm" href="{{ d['report_url'] }}" target="_blank" rel="noopener">Desktop</a>{% endif %}
+          {% set share = (m and m['share_token']) or (d and d['share_token']) %}
+          {% if share %}
+            <a class="btn btn-sm btn-primary" href="/share/speed/{{ share }}"
+               target="_blank" rel="noopener"
+               title="A page showing this measurement, with its timestamp — safe to send a client">Send to client</a>
+            <button class="btn-sm" type="button" data-share="/share/speed/{{ share }}">Copy link</button>
+          {% endif %}
+          {% if m and m['report_url'] %}<a class="btn btn-sm" href="{{ m['report_url'] }}" target="_blank" rel="noopener" title="Runs a brand new test on Google — the score will differ">Re-test</a>{% endif %}
         </td>
         <td style="font-size:12px">{{ ago(row['tested_at']) }}</td>
       </tr>
@@ -159,9 +165,9 @@
     </table></div>
   </div>
   <p class="hint">{{ pairs|length }} page(s). Scores are the Lighthouse performance
-     score out of 100; LCP is mobile where available. The share links open the public
-     PageSpeed report for that page — Google runs a fresh audit, so the numbers can
-     move slightly from the snapshot above.</p>
+     score out of 100; LCP is mobile where available. “Send to client” opens the stored
+     measurement with its timestamp; “Re-test” runs a fresh audit on Google's own site
+     and will read differently, because Lighthouse varies between runs.</p>
   {% else %}
   <div class="card empty">
     {% if domain %}
@@ -187,7 +193,7 @@
       <th class="num">{{ sortlink('lcp', 'LCP') }}</th>
       <th class="num">{{ sortlink('cls', 'CLS') }}</th>
       <th class="num">{{ sortlink('tbt', 'TBT') }}</th>
-      <th>Share</th>
+      <th>Report</th>
       <th>{{ sortlink('tested_at', 'Tested') }}</th>
     </tr>
     {% for row in results %}
@@ -199,8 +205,13 @@
       <td class="num">{{ ms(row['lcp_ms']) }}</td>
       <td class="num">{{ row['cls'] if row['cls'] is not none else '—' }}</td>
       <td class="num">{{ ms(row['tbt_ms']) }}</td>
-      <td>{% if row['report_url'] %}<a class="btn btn-sm" href="{{ row['report_url'] }}"
-             target="_blank" rel="noopener">Report</a>{% endif %}</td>
+      <td style="white-space:nowrap">
+        {% if row['share_token'] %}
+          <a class="btn btn-sm btn-primary" href="/share/speed/{{ row['share_token'] }}"
+             target="_blank" rel="noopener">Send to client</a>
+        {% endif %}
+        {% if row['report_url'] %}<a class="btn btn-sm" href="{{ row['report_url'] }}"
+             target="_blank" rel="noopener" title="Runs a brand new test">Re-test</a>{% endif %}</td>
       <td style="font-size:12px">{{ ago(row['tested_at']) }}</td>
     </tr>
     {% if row['error'] %}

@@ -25,13 +25,18 @@ API_URL = "https://www.googleapis.com/pagespeedonline/v5/runPagespeed"
 REPORT_BASE = "https://pagespeed.web.dev/analysis"
 
 
-def report_link(url: str, strategy: str) -> str:
-    """A shareable PageSpeed Insights page for this URL and device.
+def rerun_link(url: str, strategy: str) -> str:
+    """A link that makes Google run a FRESH audit of this URL.
 
-    Google's API returns no permalink for a run it performed, so this points
-    at the public report for the same URL. Opening it makes Google run a fresh
-    audit, which means the numbers can differ slightly from the snapshot stored
-    here -- Lighthouse scores vary between runs on the same page.
+    Not a record of the run we performed, and not evidence of it. The v5 API
+    is stateless: it returns a Lighthouse report and stores nothing, so there
+    is no Google-hosted permalink for a run made through it -- the analysis
+    IDs in pagespeed.web.dev URLs are minted by that site's own UI.
+
+    Opening this re-measures the page now, and Lighthouse varies between runs
+    on the same URL, so the number a client sees here will rarely match the
+    one recorded at the time. Proof of a specific measurement comes from the
+    stored report instead; see share_token on pagespeed_results.
     """
     if not url:
         return ""
@@ -65,10 +70,15 @@ class PageSpeedResult:
     tti_ms: float | None = None
     error: str | None = None
     report_url: str = ""
+    # The full Lighthouse report exactly as Google returned it. Kept because
+    # the seven numbers above cannot be verified by anyone else, and this can:
+    # Google's own Lighthouse viewer renders this JSON back into the official
+    # report, timestamp and all.
+    lighthouse: dict | None = None
 
     def __post_init__(self) -> None:
         if not self.report_url and self.url:
-            self.report_url = report_link(self.url, self.strategy)
+            self.report_url = rerun_link(self.url, self.strategy)
 
     @property
     def ok(self) -> bool:
@@ -79,6 +89,8 @@ def parse_response(domain: str, url: str, strategy: str, payload: dict) -> PageS
     """Pull the handful of numbers worth keeping out of a Lighthouse report."""
     result = PageSpeedResult(domain=domain, url=url, strategy=strategy)
     lighthouse = payload.get("lighthouseResult") or {}
+    if lighthouse:
+        result.lighthouse = lighthouse
 
     categories = lighthouse.get("categories") or {}
     score = (categories.get("performance") or {}).get("score")
@@ -238,4 +250,12 @@ async def run_pagespeed(
     database.finish_pagespeed_run(
         run_id, status="completed", urls_tested=tested, failures=failures
     )
+
+    # Stored Lighthouse reports are the largest thing this app writes. Trim
+    # them once the run is recorded, never before -- the reports this sweep
+    # just produced are the ones most likely to be shared.
+    dropped = database.prune_pagespeed_reports(settings.pagespeed_keep_reports)
+    if dropped:
+        log.info("pruned %s stored Lighthouse reports", dropped)
+
     return run_id, tested, failures

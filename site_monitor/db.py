@@ -7,6 +7,9 @@ anyone asks of this tool.
 
 from __future__ import annotations
 
+import gzip
+import json
+import secrets
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -140,7 +143,9 @@ CREATE TABLE IF NOT EXISTS pagespeed_results (
     tti_ms       REAL,
     error        TEXT,
     tested_at    TEXT    NOT NULL,
-    report_url   TEXT    NOT NULL DEFAULT ''
+    report_url   TEXT    NOT NULL DEFAULT '',
+    report_json  BLOB,
+    share_token  TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_ps_results_run    ON pagespeed_results(run_id);
@@ -159,6 +164,36 @@ def utcnow() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+
+# Indexes that reference a column added by MIGRATIONS. See __init__.
+POST_MIGRATION_INDEXES = """
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ps_share ON pagespeed_results(share_token)
+    WHERE share_token IS NOT NULL;
+"""
+
+
+def _pack_report(report: "dict | None") -> "bytes | None":
+    """Compress a Lighthouse report for storage.
+
+    These are large and extremely repetitive -- gzip takes a typical one from
+    hundreds of kilobytes down to tens. Worth keeping, because it is the only
+    part of a PageSpeed run that anybody else can independently verify.
+    """
+    if not report:
+        return None
+    return gzip.compress(json.dumps(report, separators=(",", ":")).encode(), 6)
+
+
+def unpack_report(blob: "bytes | None") -> "dict | None":
+    """Read a stored Lighthouse report back, tolerating a corrupt blob."""
+    if not blob:
+        return None
+    try:
+        return json.loads(gzip.decompress(blob).decode())
+    except (OSError, ValueError, UnicodeDecodeError):
+        return None
+
+
 class Database:
     """A small wrapper over one SQLite file."""
 
@@ -172,6 +207,12 @@ class Database:
         self._conn.execute("PRAGMA foreign_keys=ON")
         self._conn.executescript(SCHEMA)
         self._migrate()
+        # Indexes over migrated columns come last. SCHEMA runs before the
+        # migration, so on an existing database the column an index needs is
+        # not there yet and CREATE INDEX fails -- taking the whole app down
+        # on the deploy that introduced it, while every fresh-database test
+        # passes.
+        self._conn.executescript(POST_MIGRATION_INDEXES)
         self._conn.commit()
 
     # Columns added after the first release. CREATE TABLE IF NOT EXISTS does
@@ -184,6 +225,8 @@ class Database:
         ("pagespeed_runs", "expected", "expected INTEGER NOT NULL DEFAULT 0"),
         ("pagespeed_results", "report_url", "report_url TEXT NOT NULL DEFAULT ''"),
         ("site_runs", "warning", "warning TEXT NOT NULL DEFAULT ''"),
+        ("pagespeed_results", "report_json", "report_json BLOB"),
+        ("pagespeed_results", "share_token", "share_token TEXT"),
     )
 
     def _migrate(self) -> None:
@@ -636,8 +679,9 @@ class Database:
                 """
                 INSERT INTO pagespeed_results (
                     run_id, domain, url, strategy, performance, fcp_ms, lcp_ms,
-                    cls, tbt_ms, speed_index, tti_ms, error, tested_at, report_url
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    cls, tbt_ms, speed_index, tti_ms, error, tested_at,
+                    report_url, report_json, share_token
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     run_id,
@@ -654,6 +698,11 @@ class Database:
                     result.error,
                     utcnow(),
                     result.report_url,
+                    _pack_report(getattr(result, "lighthouse", None)),
+                    # Every result gets a share link the moment it is stored.
+                    # Minting on demand would mean a write on a page a client
+                    # is opening, and the token is what identifies the run.
+                    secrets.token_urlsafe(12),
                 ),
             )
 
@@ -951,3 +1000,61 @@ class Database:
                 (f"schedule:{name}", limit),
             )
         )
+
+    # -- shared PageSpeed reports -----------------------------------------
+
+    def pagespeed_result_by_token(self, token: str) -> sqlite3.Row | None:
+        """One stored result, addressed by its share token."""
+        if not token:
+            return None
+        return self._conn.execute(
+            "SELECT * FROM pagespeed_results WHERE share_token = ?", (token,)
+        ).fetchone()
+
+    def pagespeed_sibling(self, row: sqlite3.Row) -> sqlite3.Row | None:
+        """The same URL's other device from the same run.
+
+        A client asks "how fast is my site", not "how fast on mobile" -- so a
+        shared report shows both, and the sibling is what supplies the other
+        half.
+        """
+        other = "desktop" if row["strategy"] == "mobile" else "mobile"
+        return self._conn.execute(
+            """
+            SELECT * FROM pagespeed_results
+             WHERE run_id = ? AND url = ? AND strategy = ?
+             LIMIT 1
+            """,
+            (row["run_id"], row["url"], other),
+        ).fetchone()
+
+    def prune_pagespeed_reports(self, keep_per_url: int) -> int:
+        """Drop stored Lighthouse JSON beyond the newest `keep_per_url`.
+
+        Only the blob goes: the scores, the timestamps and the share tokens
+        all survive, so an old shared link still shows what was measured --
+        it just loses the "open it in Google's viewer" attachment. 0 keeps
+        everything.
+        """
+        if keep_per_url <= 0:
+            return 0
+        with self._tx() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE pagespeed_results SET report_json = NULL
+                 WHERE report_json IS NOT NULL
+                   AND id NOT IN (
+                       SELECT id FROM (
+                           SELECT id, ROW_NUMBER() OVER (
+                                      PARTITION BY url, strategy
+                                      ORDER BY tested_at DESC, id DESC
+                                  ) AS rank
+                             FROM pagespeed_results
+                            WHERE report_json IS NOT NULL
+                       ) ranked
+                        WHERE rank <= ?
+                   )
+                """,
+                (keep_per_url,),
+            )
+            return cursor.rowcount

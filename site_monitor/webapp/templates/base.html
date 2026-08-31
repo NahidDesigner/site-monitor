@@ -312,6 +312,14 @@ tr[data-site].is-broken{background:color-mix(in srgb,var(--bad) 7%,transparent)}
     var ok=false; try{ ok = document.execCommand('copy'); }catch(e){}
     document.body.removeChild(ta); done(ok);
   }
+  // Share links are stored as paths so they survive a domain change; the
+  // client needs the absolute URL, so it is built at click time.
+  document.querySelectorAll('[data-share]').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      copyText(location.origin + btn.getAttribute('data-share'), btn);
+    });
+  });
+
   document.querySelectorAll('[data-copy]').forEach(function(btn){
     btn.addEventListener('click', function(){
       var attr = btn.getAttribute('data-copy')==='page' ? 'data-page-url' : 'data-asset-url';

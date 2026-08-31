@@ -161,12 +161,12 @@ def test_sort_key_is_whitelisted_against_injection(tmp_path):
 # -- shareable report links ---------------------------------------------------
 
 
-def test_a_result_carries_a_shareable_report_link():
-    from site_monitor.pagespeed import report_link
+def test_a_result_carries_a_shareable_rerun_link():
+    from site_monitor.pagespeed import rerun_link
 
     result = parse_response("a.com", "https://a.com/page/?x=1", "mobile", REPORT)
 
-    assert result.report_url == report_link("https://a.com/page/?x=1", "mobile")
+    assert result.report_url == rerun_link("https://a.com/page/?x=1", "mobile")
     assert "pagespeed.web.dev" in result.report_url
     # The URL must survive being embedded as a query parameter.
     assert "https%3A%2F%2Fa.com%2Fpage%2F%3Fx%3D1" in result.report_url
@@ -174,17 +174,17 @@ def test_a_result_carries_a_shareable_report_link():
 
 
 def test_the_link_reflects_the_device_tested():
-    from site_monitor.pagespeed import report_link
+    from site_monitor.pagespeed import rerun_link
 
-    assert report_link("https://a.com/", "desktop").endswith("form_factor=desktop")
+    assert rerun_link("https://a.com/", "desktop").endswith("form_factor=desktop")
     # Anything unrecognised falls back to mobile rather than an invalid link.
-    assert report_link("https://a.com/", "watch").endswith("form_factor=mobile")
+    assert rerun_link("https://a.com/", "watch").endswith("form_factor=mobile")
 
 
 def test_no_link_without_a_url():
-    from site_monitor.pagespeed import report_link
+    from site_monitor.pagespeed import rerun_link
 
-    assert report_link("", "mobile") == ""
+    assert rerun_link("", "mobile") == ""
 
 
 # -- pairing mobile with desktop ----------------------------------------------
