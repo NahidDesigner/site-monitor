@@ -137,6 +137,13 @@ def create_app(base_settings: Settings) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         with db() as database:
+            orphaned = database.close_orphaned_runs()
+            if orphaned:
+                log.warning(
+                    "marked %s run(s) as interrupted -- the app restarted while "
+                    "they were in progress",
+                    orphaned,
+                )
             # Arm any schedule that has no next fire time yet, so a restart
             # neither loses a schedule nor fires it immediately.
             for row in database.list_schedules():

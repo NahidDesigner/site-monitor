@@ -473,6 +473,33 @@ class Database:
                         (key, str(value).strip(), now),
                     )
 
+    def close_orphaned_runs(self) -> int:
+        """Mark runs left mid-flight by a restart, and report how many.
+
+        Only one process owns runs, and it starts with nothing in flight, so
+        anything still `running` when the app boots was killed by a restart,
+        a redeploy or a crash. Left alone it sits in the Reports list forever
+        claiming to be in progress.
+        """
+        with self._tx() as conn:
+            css = conn.execute(
+                """
+                UPDATE runs SET status = 'interrupted', finished_at = ?,
+                       error = 'the app restarted while this run was in progress'
+                 WHERE status = 'running'
+                """,
+                (utcnow(),),
+            ).rowcount
+            pagespeed = conn.execute(
+                """
+                UPDATE pagespeed_runs SET status = 'interrupted', finished_at = ?,
+                       error = 'the app restarted while this test was in progress'
+                 WHERE status = 'running'
+                """,
+                (utcnow(),),
+            ).rowcount
+        return css + pagespeed
+
     # -- schedules ---------------------------------------------------------
 
     def list_schedules(self, *, enabled_only: bool = False) -> list[sqlite3.Row]:

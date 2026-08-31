@@ -186,3 +186,35 @@ def test_marking_a_run_records_status_and_next_time(database):
     assert row["last_status"] == "started"
     assert row["next_run_at"] == "2026-09-01T00:00:00+00:00"
     assert row["last_run_at"] is not None
+
+
+# -- runs orphaned by a restart -----------------------------------------------
+
+
+def test_runs_left_in_flight_by_a_restart_are_closed_out(database):
+    """Otherwise they sit in Reports forever claiming to be in progress."""
+    run_id = database.start_run()
+    ps_id = database.start_pagespeed_run()
+
+    closed = database.close_orphaned_runs()
+
+    assert closed == 2
+    assert database.run(run_id)["status"] == "interrupted"
+    assert database.run(run_id)["finished_at"] is not None
+    assert "restarted" in database.run(run_id)["error"]
+    assert database.pagespeed_runs(1)[0]["status"] == "interrupted"
+
+
+def test_completed_runs_are_left_alone(database):
+    run_id = database.start_run()
+    database.finish_run(
+        run_id, status="completed", sites_checked=1, pages_checked=2,
+        assets_checked=3, broken_assets=0,
+    )
+
+    assert database.close_orphaned_runs() == 0
+    assert database.run(run_id)["status"] == "completed"
+
+
+def test_closing_orphans_is_safe_when_there_are_none(database):
+    assert database.close_orphaned_runs() == 0
