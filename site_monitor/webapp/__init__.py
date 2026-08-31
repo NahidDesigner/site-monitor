@@ -205,6 +205,22 @@ def create_app(base_settings: Settings) -> FastAPI:
     # ---- auth ----------------------------------------------------------
 
     @app.middleware("http")
+    async def no_caching(request: Request, call_next):
+        """Tell every cache in front of us not to keep any of this.
+
+        Behind a CDN, a cached signed-in page served to the next visitor is a
+        data leak, and a cached progress poll makes a running check look stuck.
+        Nothing this app serves is cacheable: every page is per-session and the
+        assets are inline. The health check is the one exception, so an uptime
+        probe is not answered from a cache.
+        """
+        response = await call_next(request)
+        if request.url.path != "/healthz":
+            response.headers["Cache-Control"] = "no-store, private"
+            response.headers["Vary"] = "Cookie, Authorization"
+        return response
+
+    @app.middleware("http")
     async def require_login(request: Request, call_next):
         if request.url.path in {"/login", "/healthz"}:
             return await call_next(request)

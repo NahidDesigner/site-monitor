@@ -736,3 +736,26 @@ def test_a_speed_test_on_an_unknown_site_is_reported(signed_in):
     response = signed_in.post("/sites/nope.com/pagespeed", follow_redirects=False)
 
     assert "error=" in response.headers["location"]
+
+
+# -- caching in front of the app ----------------------------------------------
+
+
+@pytest.mark.parametrize("path", ["/", "/sites", "/pagespeed", "/api/run/status"])
+def test_nothing_is_cacheable_by_a_cdn(signed_in, path):
+    """A cached signed-in page served to the next visitor would be a leak, and
+    a cached progress poll makes a running check look stuck."""
+    response = signed_in.get(path)
+
+    assert response.headers["cache-control"] == "no-store, private"
+    assert "Cookie" in response.headers["vary"]
+
+
+def test_the_login_page_is_not_cacheable_either(client):
+    assert client.get("/login").headers["cache-control"] == "no-store, private"
+
+
+def test_the_health_check_stays_cacheable(client):
+    """An uptime probe should reach the app, not be answered from a cache --
+    but it carries nothing private, so it needs no directive of its own."""
+    assert "cache-control" not in client.get("/healthz").headers
