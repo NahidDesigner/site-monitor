@@ -128,3 +128,41 @@ async def test_a_cached_page_is_what_gets_checked():
         response = await fetcher.get("https://example.com/")
 
     assert "ver=OLD" in response.text
+
+
+# -- never ask for an encoding we cannot decode -------------------------------
+
+
+def test_accept_encoding_only_advertises_what_httpx_can_decode():
+    """The bug this guards: `br` advertised while brotli was not installed.
+
+    httpx does not raise on an encoding it cannot decode -- it hands back the
+    undecoded body. So every Brotli page arrived as binary, every regex over
+    it matched nothing, and every Cloudflare-fronted site was reported clean.
+    """
+    from httpx._models import SUPPORTED_DECODERS
+
+    advertised = {
+        part.strip() for part in browser_headers("UA")["Accept-Encoding"].split(",")
+    }
+
+    assert advertised <= set(SUPPORTED_DECODERS)
+    assert "identity" not in advertised
+
+
+def test_brotli_is_installed_so_we_can_ask_for_it():
+    """Most of Cloudflare serves Brotli; without the decoder we go blind."""
+    assert "br" in browser_headers("UA")["Accept-Encoding"]
+
+
+def test_a_missing_decoder_narrows_the_header_instead_of_breaking_detection(monkeypatch):
+    import httpx._models as models
+
+    monkeypatch.setattr(
+        models,
+        "SUPPORTED_DECODERS",
+        {k: v for k, v in models.SUPPORTED_DECODERS.items() if k != "br"},
+    )
+
+    assert "br" not in browser_headers("UA")["Accept-Encoding"]
+    assert "gzip" in browser_headers("UA")["Accept-Encoding"]

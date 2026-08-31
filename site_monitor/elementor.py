@@ -41,6 +41,21 @@ ELEMENTOR_CSS_HREF_RE = re.compile(
 # false breakage.
 HEAD_UNSUPPORTED_STATUSES = frozenset({403, 405, 501})
 
+# Any real WordPress page contains at least one of these. A 200 that contains
+# none of them is not a page we failed to find stylesheets in -- it is a body
+# we failed to read, and the difference matters enormously: the first is a
+# result, the second is a bug wearing a result's clothes.
+#
+# This guard exists because of one: `Accept-Encoding` advertised Brotli while
+# the Brotli decoder was missing, so pages arrived as binary and every site
+# behind Cloudflare reported zero stylesheets and a clean bill of health.
+HTML_MARKERS = ("<html", "<!doctype", "<head", "<body", "<link", "<div")
+
+
+def looks_like_html(text: str) -> bool:
+    """True if this body is markup at all, rather than bytes we cannot read."""
+    return any(marker in text[:65536].lower() for marker in HTML_MARKERS)
+
 
 @dataclass(frozen=True)
 class AssetResult:
@@ -172,6 +187,22 @@ async def check_page(
             assets_checked=0,
             broken=(),
             error=f"page returned HTTP {response.status_code}",
+        )
+
+    if not looks_like_html(response.text):
+        # Name the encoding: when this fires it is nearly always an undecoded
+        # body, and that is the first thing anyone will want to know.
+        encoding = response.headers.get("content-encoding") or "none"
+        return PageResult(
+            url=page_url,
+            status_code=response.status_code,
+            assets_checked=0,
+            broken=(),
+            error=(
+                f"response body was not readable HTML "
+                f"(content-encoding: {encoding}) -- it could not be searched "
+                f"for stylesheets"
+            ),
         )
 
     css_urls = extract_elementor_css_urls(response.text, str(response.url))

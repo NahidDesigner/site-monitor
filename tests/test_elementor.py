@@ -19,6 +19,7 @@ from site_monitor.elementor import (
     check_page,
     extract_elementor_css_urls,
     judge_asset,
+    looks_like_html,
 )
 from site_monitor.http import Fetcher, build_client
 
@@ -254,3 +255,100 @@ async def test_page_without_elementor_is_skipped_cleanly():
 
     assert result.assets_checked == 0
     assert not result.is_broken
+
+
+# -- a body we cannot read is a failure, not a clean page ---------------------
+
+
+def run_page_check(handler, url: str, *, decoders_without: str | None = None):
+    """Drive check_page against a handler, optionally with a decoder removed.
+
+    `decoders_without` emulates a build where that codec is not installed,
+    which is how the Brotli outage actually arose in the container.
+    """
+    import httpx._models as models
+
+    async def go():
+        async with build_client(
+            user_agent="UA", timeout=10, max_connections=4,
+            transport=httpx.MockTransport(handler),
+        ) as client:
+            return await check_page(
+                Fetcher(client, max_retries=1, backoff=0.0),
+                url,
+                asset_semaphore=asyncio.Semaphore(4),
+            )
+
+    if decoders_without is None:
+        return asyncio.run(go())
+
+    saved = models.SUPPORTED_DECODERS
+    models.SUPPORTED_DECODERS = {
+        k: v for k, v in saved.items() if k != decoders_without
+    }
+    try:
+        return asyncio.run(go())
+    finally:
+        models.SUPPORTED_DECODERS = saved
+
+
+def test_a_brotli_body_we_cannot_decode_is_an_error_not_a_pass():
+    """The exact shape of the outage: 200, text/html, and unreadable bytes.
+
+    Reported as a clean page, this hid broken CSS across 44 sites at once.
+    """
+    import brotli
+
+    page = (
+        "<html><head><link rel='stylesheet' href='"
+        "https://d.com/wp-content/uploads/elementor/css/post-1.css?ver=2'>"
+        "</head></html>"
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            content=brotli.compress(page.encode()),
+            headers={"content-type": "text/html", "content-encoding": "br"},
+        )
+
+    result = run_page_check(handler, "https://d.com/a/", decoders_without="br")
+
+    assert result.error is not None
+    assert "not readable HTML" in result.error
+    assert "content-encoding: br" in result.error
+    assert result.assets_checked == 0
+    assert result.is_broken  # it must show up as a finding, not vanish
+
+
+def test_the_same_page_is_read_normally_once_brotli_can_be_decoded():
+    import brotli
+
+    page = (
+        "<html><head><link rel='stylesheet' href='"
+        "https://d.com/wp-content/uploads/elementor/css/post-1.css?ver=2'>"
+        "</head></html>"
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith(".css"):
+            return httpx.Response(200, headers={"content-type": "text/css"})
+        return httpx.Response(
+            200,
+            content=brotli.compress(page.encode()),
+            headers={"content-type": "text/html", "content-encoding": "br"},
+        )
+
+    result = run_page_check(handler, "https://d.com/a/")
+
+    assert result.error is None
+    assert result.assets_checked == 1
+    assert not result.is_broken
+
+
+def test_looks_like_html_accepts_real_pages_and_rejects_binary():
+    assert looks_like_html("<!DOCTYPE html><html><body>x</body></html>")
+    assert looks_like_html("\n\n  <html lang='en'>")
+    assert looks_like_html("<div>fragment</div>")
+    assert not looks_like_html("\x1b\x1f\x01\xd0\xb2\r\x1d6;\x0eT\x2cok")
+    assert not looks_like_html("")

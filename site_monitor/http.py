@@ -28,6 +28,29 @@ class FetchError(Exception):
         return f"{self.url}: {self.reason}"
 
 
+def decodable_encodings() -> str:
+    """The content encodings this build can actually decode, as a header value.
+
+    Asking for an encoding we cannot decode is worse than not asking. httpx
+    hands back an undecoded body rather than raising, so a Brotli page arrives
+    as binary in `response.text`, every regex over it matches nothing, and the
+    page is reported as having no stylesheets -- clean, and completely wrong.
+
+    That is exactly what a hardcoded `gzip, deflate, br` did here: `brotli` was
+    not installed, so most of Cloudflare's traffic came back as noise.
+
+    So the advertised list is derived from the decoders httpx actually has,
+    rather than written out by hand. Install `brotli` and `br` appears in the
+    header; remove it and the header narrows instead of the tool going blind.
+    """
+    try:
+        from httpx._models import SUPPORTED_DECODERS
+    except ImportError:  # pragma: no cover - httpx moved it; stay conservative
+        return "gzip, deflate"
+    usable = [name for name in SUPPORTED_DECODERS if name != "identity"]
+    return ", ".join(usable) if usable else "identity"
+
+
 def browser_headers(user_agent: str) -> dict[str, str]:
     """Exactly what a browser sends on an ordinary navigation.
 
@@ -46,7 +69,11 @@ def browser_headers(user_agent: str) -> dict[str, str]:
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,"
         "image/webp,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
-        "Accept-Encoding": "gzip, deflate, br",
+        # Derived, never hardcoded -- see decodable_encodings(). Brotli matters
+        # beyond decoding, too: Cloudflare varies its cache on Accept-Encoding,
+        # so asking for what a browser asks for is what gets us the cache entry
+        # a real visitor is served, which is the whole point of the check.
+        "Accept-Encoding": decodable_encodings(),
     }
 
 
