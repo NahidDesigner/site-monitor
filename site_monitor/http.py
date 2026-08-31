@@ -29,18 +29,24 @@ class FetchError(Exception):
 
 
 def browser_headers(user_agent: str) -> dict[str, str]:
-    """Headers a real browser would send.
+    """Exactly what a browser sends on an ordinary navigation.
 
-    The User-Agent matters: some stacks (and Cloudflare) vary their response by
-    it, and we want to see the same HTML a visitor sees.
+    The User-Agent matters because some stacks (and Cloudflare) vary their
+    response by it, and we need the same HTML a visitor gets.
+
+    Deliberately no Cache-Control or Pragma. A browser sends neither on a normal
+    navigation -- only on a hard refresh -- so sending them marks the request as
+    unusual. Worse, they ask intermediaries to bypass the cache, and the stale
+    cache is the entire thing being measured: a layer that honoured them would
+    serve freshly generated HTML and the stale ?ver= reference would never
+    appear. We want the cached page, exactly as a visitor receives it.
     """
     return {
         "User-Agent": user_agent,
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,"
         "image/webp,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
-        "Cache-Control": "no-cache",
-        "Pragma": "no-cache",
+        "Accept-Encoding": "gzip, deflate, br",
     }
 
 

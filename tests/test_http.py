@@ -95,3 +95,36 @@ def test_browser_headers_look_like_a_browser():
 
     assert headers["User-Agent"] == "Mozilla/5.0 test"
     assert "text/html" in headers["Accept"]
+
+
+def test_no_cache_busting_headers_are_sent():
+    """Two reasons, and the second is the important one.
+
+    A browser sends Cache-Control/Pragma only on a hard refresh, so sending them
+    marks the request as unusual. And they ask intermediaries to bypass the
+    cache -- the stale cache being measured. A layer that honoured them would
+    hand back freshly generated HTML, and the stale ?ver= reference this tool
+    exists to find would never appear.
+    """
+    headers = browser_headers("Mozilla/5.0 test")
+
+    assert "Cache-Control" not in headers
+    assert "Pragma" not in headers
+
+
+async def test_a_cached_page_is_what_gets_checked():
+    """End to end: a server that varies on cache-busting must serve us the
+    cached copy, because that is the copy with the broken reference in it."""
+    STALE = "<html><head><link href='/elementor/css/post-1.css?ver=OLD'></head></html>"
+    FRESH = "<html><head><link href='/elementor/css/post-1.css?ver=NEW'></head></html>"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        busting = request.headers.get("cache-control", "") or request.headers.get("pragma", "")
+        return httpx.Response(200, text=FRESH if busting else STALE,
+                              headers={"content-type": "text/html"})
+
+    client, fetcher = _fetcher(handler)
+    async with client:
+        response = await fetcher.get("https://example.com/")
+
+    assert "ver=OLD" in response.text
