@@ -88,6 +88,32 @@ def _redirect(path: str, **params) -> RedirectResponse:
     return RedirectResponse(f"{path}?{query}" if query else path, status_code=303)
 
 
+def _transport_security(settings: Settings):
+    """Host checking for the MCP endpoint.
+
+    The SDK's DNS-rebinding protection allows only 127.0.0.1 unless told
+    otherwise, so behind a real domain every authenticated request comes back
+    421 Misdirected Request. It matches hosts exactly -- there is no "*"
+    wildcard -- so allowing any host means turning the check off.
+
+    That is the default here, and it is safe for this deployment: the protection
+    exists to stop a malicious page reaching a *local* MCP server through a
+    rebound DNS name, whereas this endpoint is public and sits behind a bearer
+    check that runs before the MCP app sees the request. A browser-driven
+    attacker cannot supply that token. Set MCP_ALLOWED_HOSTS to pin it anyway.
+    """
+    from mcp.server.transport_security import TransportSecuritySettings
+
+    hosts = [h for h in settings.mcp_allowed_hosts if h != "*"]
+    if not hosts:
+        return TransportSecuritySettings(enable_dns_rebinding_protection=False)
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=hosts,
+        allowed_origins=[f"https://{h}" for h in hosts] + hosts,
+    )
+
+
 def _local_filter(tz_name: str):
     """Render a stored UTC timestamp in the timezone schedules are written in.
 
@@ -145,7 +171,10 @@ def create_app(base_settings: Settings) -> FastAPI:
         mcp_app = build_mcp_server(
             base_settings, manager, current_settings
         ).streamable_http_app(
-            streamable_http_path="/", stateless_http=True, json_response=True,
+            streamable_http_path="/",
+            stateless_http=True,
+            json_response=True,
+            transport_security=_transport_security(base_settings),
         )
 
     @asynccontextmanager

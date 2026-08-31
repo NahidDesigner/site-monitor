@@ -108,6 +108,10 @@ class Settings:
     # MCP. A separate credential from the dashboard password on purpose: it is
     # handed to an AI client, so it should be revocable without locking you out.
     mcp_token: str | None = None
+    # Hosts the MCP endpoint will answer to. "*" allows any, which is the
+    # default because the endpoint sits behind bearer auth and behind a reverse
+    # proxy that rewrites Host anyway. Pin it if you want belt and braces.
+    mcp_allowed_hosts: tuple[str, ...] = ("*",)
 
     # Dashboard
     dashboard_password: str | None = None
@@ -143,6 +147,10 @@ class Settings:
             pagespeed_concurrency=_env_int("PAGESPEED_CONCURRENCY", 2),
             timezone=os.getenv("TIMEZONE", "UTC"),
             mcp_token=os.getenv("MCP_TOKEN") or None,
+            mcp_allowed_hosts=tuple(
+                h.strip() for h in os.getenv("MCP_ALLOWED_HOSTS", "*").split(",")
+                if h.strip()
+            ) or ("*",),
             dashboard_password=os.getenv("DASHBOARD_PASSWORD") or None,
             # Without an explicit secret, sessions are signed with a key
             # derived from the password. That means changing the password

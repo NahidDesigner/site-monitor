@@ -309,3 +309,64 @@ async def test_get_status_never_returns_secrets(server, settings):
     assert result["telegram_configured"] is False
     assert TOKEN not in body
     assert "pw" not in [v for v in result.values() if isinstance(v, str)]
+
+
+# -- reaching it under a real hostname ----------------------------------------
+
+
+def _initialize(client, host: str, token: str | None = TOKEN):
+    headers = {
+        "Host": host,
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/event-stream",
+    }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return client.post(
+        "/mcp/",
+        headers=headers,
+        json={
+            "jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18", "capabilities": {},
+                "clientInfo": {"name": "t", "version": "1"},
+            },
+        },
+    )
+
+
+def test_mcp_answers_under_a_real_hostname(settings):
+    """The SDK's DNS-rebinding protection defaults to 127.0.0.1 only, so behind
+    a domain every authenticated request came back 421 Misdirected Request.
+    Testing against localhost cannot catch this -- the Host header matches there.
+    """
+    with TestClient(create_app(settings)) as client:
+        response = _initialize(client, "bosseo.vibecodingfield.com")
+
+    assert response.status_code != 421, "rejected as a misdirected request"
+    assert response.status_code == 200
+
+
+def test_mcp_still_answers_under_localhost(settings):
+    with TestClient(create_app(settings)) as client:
+        assert _initialize(client, "127.0.0.1").status_code == 200
+
+
+def test_auth_is_still_required_under_a_real_hostname(settings):
+    """Loosening host checking must not loosen authentication."""
+    with TestClient(create_app(settings)) as client:
+        response = _initialize(client, "bosseo.vibecodingfield.com", token=None)
+
+    assert response.status_code == 401
+
+
+def test_hosts_can_be_pinned(tmp_path):
+    """For anyone who wants the host check back, narrowed to their own domain."""
+    pinned = Settings(
+        database_path=tmp_path / "p.db", dashboard_password="pw",
+        session_secret="s", mcp_token=TOKEN,
+        mcp_allowed_hosts=("bosseo.vibecodingfield.com",),
+    )
+    with TestClient(create_app(pinned)) as client:
+        assert _initialize(client, "bosseo.vibecodingfield.com").status_code == 200
+        assert _initialize(client, "attacker.example.com").status_code == 421
