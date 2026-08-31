@@ -319,3 +319,91 @@ async def test_site_with_an_empty_page_list_reports_an_error(tmp_path):
     run = await run_checks(settings, transport=httpx.MockTransport(handler))
 
     assert run.sites[0].error
+
+
+# --- a pass that verified nothing must not read as healthy -------------------
+
+# Real cause seen in the wild: an optimisation plugin combines every stylesheet
+# into its own cache directory, so nothing matches `elementor/css/` any more.
+PAGE_WITHOUT_ELEMENTOR = (
+    "<html><head>"
+    '<link rel="stylesheet" href="/wp-content/cache/min/1/combined.css?ver=9">'
+    "</head><body>hello</body></html>"
+)
+
+
+def plain_pages(request: httpx.Request) -> httpx.Response:
+    """Every page loads fine and references no Elementor stylesheet."""
+    return httpx.Response(
+        200, text=PAGE_WITHOUT_ELEMENTOR, headers={"content-type": "text/html"}
+    )
+
+
+def site_with_plain_pages(count: int = 5) -> Settings:
+    return Settings(
+        sites=[
+            Site(
+                domain="law.example",
+                pages=[f"https://law.example/{n}/" for n in range(count)],
+            )
+        ]
+    )
+
+
+async def test_a_site_with_no_elementor_stylesheets_is_flagged_not_passed():
+    run = await run_checks(
+        site_with_plain_pages(), transport=httpx.MockTransport(plain_pages)
+    )
+    result = run.sites[0]
+
+    # It looks clean by every count the report carries...
+    assert result.pages_checked == 5
+    assert result.assets_checked == 0
+    assert result.broken_asset_count == 0
+    assert result.error is None
+
+    # ...which is exactly why it has to be called out instead of passed.
+    assert result.warning is not None
+    assert "no Elementor stylesheets" in result.warning
+    assert result.pages_without_assets == 5
+    assert result.has_findings
+    assert run.has_findings
+
+
+async def test_unreachable_pages_are_not_reported_as_a_blind_spot():
+    """A site that failed to load is already reported; don't double-report it."""
+
+    def down(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, text="boom", headers={"content-type": "text/html"})
+
+    settings = Settings(sites=[Site(domain="down.example", pages=["https://down.example/a"])])
+    run = await run_checks(settings, transport=httpx.MockTransport(down))
+    result = run.sites[0]
+
+    assert result.warning is None
+    assert result.broken_pages  # the page error is the finding
+    assert result.has_findings
+
+
+async def test_a_healthy_site_carries_no_warning(tmp_path):
+    run = await run_checks(
+        settings_for(tmp_path), transport=httpx.MockTransport(handler)
+    )
+    result = run.sites[0]
+
+    assert result.assets_checked
+    assert result.warning is None
+
+
+async def test_the_warning_survives_a_round_trip_through_the_database(tmp_path):
+    run = await run_checks(
+        site_with_plain_pages(1), transport=httpx.MockTransport(plain_pages)
+    )
+
+    with Database(tmp_path / "monitor.db") as database:
+        run_id = database.start_run()
+        database.record_site_result(run_id, run.sites[0])
+        rows = database.site_runs_for_run(run_id)
+
+    assert len(rows) == 1
+    assert "no Elementor stylesheets" in rows[0]["warning"]

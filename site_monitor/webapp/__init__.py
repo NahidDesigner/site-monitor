@@ -353,6 +353,11 @@ def create_app(base_settings: Settings) -> FastAPI:
             latest = database.latest_run()
             broken = database.broken_assets_for_run(latest["id"]) if latest else []
             errors = database.page_errors_for_run(latest["id"]) if latest else []
+            unverified = (
+                [r for r in database.site_runs_for_run(latest["id"]) if r["warning"]]
+                if latest
+                else []
+            )
             recent = database.recent_runs(6)
             schedules = database.list_schedules()
             ps_latest = database.latest_pagespeed_run()
@@ -378,6 +383,7 @@ def create_app(base_settings: Settings) -> FastAPI:
             total_pages=sum(len(s.pages) for s in enabled),
             latest=latest,
             grouped=grouped,
+            unverified=unverified,
             errors=errors,
             recent=recent,
             schedules=schedules,

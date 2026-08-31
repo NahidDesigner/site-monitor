@@ -123,6 +123,24 @@ def test_site_level_errors_are_reported_too():
     assert "sitemap unreachable" in body
 
 
+def test_a_site_that_verified_nothing_raises_an_alert():
+    """Zero broken is not good news when there was nothing to judge."""
+    unverified = site(
+        "law.example",
+        [page("https://law.example/a", [], checked=0)],
+        warning="no Elementor stylesheets found on any of 145 pages, so nothing was verified",
+    )
+    run = RunResult(sites=[unverified])
+
+    assert run.has_findings
+    body = "\n".join(format_alert(run))
+
+    assert "law.example" in body
+    assert "nothing was verified" in body
+    # It must not be dressed up as a breakage count.
+    assert "0 broken CSS" not in body
+
+
 def test_html_in_urls_is_escaped():
     run = RunResult(
         sites=[

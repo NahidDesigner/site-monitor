@@ -34,7 +34,7 @@
   <div class="tile {{ 'bad' if grouped else 'ok' }}">
     <div class="k">Sites affected</div>
     <div class="v">{{ grouped|length }}</div>
-    <div class="s">{{ 'needs attention' if grouped else 'all clear' }}</div>
+    <div class="s">{% if grouped %}needs attention{% elif unverified %}nothing broken, but see below{% else %}all clear{% endif %}</div>
   </div>
   <div class="tile">
     <div class="k">Last run at</div>
@@ -42,6 +42,16 @@
     <div class="s">{{ latest['status'] if latest else '' }}</div>
   </div>
 </div>
+
+{% if unverified %}
+<div class="banner warn">
+  <strong>{{ unverified|length }} site{{ 's' if unverified|length != 1 else '' }} could not be verified.</strong>
+  Their pages loaded, but referenced no Elementor stylesheet, so this check
+  proved nothing about them either way:
+  {{ unverified | map(attribute='domain') | join(', ') }}.
+  <a href="/runs/{{ latest['id'] }}">See the report</a>
+</div>
+{% endif %}
 
 {% if grouped %}
 <div class="card">

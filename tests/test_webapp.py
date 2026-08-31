@@ -759,3 +759,71 @@ def test_the_health_check_stays_cacheable(client):
     """An uptime probe should reach the app, not be answered from a cache --
     but it carries nothing private, so it needs no directive of its own."""
     assert "cache-control" not in client.get("/healthz").headers
+
+
+# -- an unverified site must not read as "all clear" --------------------------
+
+
+def _record_unverified_run(database) -> int:
+    from site_monitor.crawler import SiteResult
+    from site_monitor.elementor import PageResult
+
+    database.upsert_site(domain="law.example", pages=["https://law.example/a"])
+    run_id = database.start_run()
+    database.record_site_result(
+        run_id,
+        SiteResult(
+            domain="law.example",
+            pages=[PageResult(url="https://law.example/a", status_code=200,
+                              assets_checked=0, broken=())],
+            pages_found=1,
+            warning="no Elementor stylesheets found on any of 145 pages, "
+                    "so nothing was verified",
+        ),
+    )
+    database.finish_run(run_id, sites_checked=1, pages_checked=1,
+                        assets_checked=0, broken_assets=0, status="ok")
+    return run_id
+
+
+def test_the_dashboard_will_not_call_an_unverified_site_all_clear(signed_in, database):
+    _record_unverified_run(database)
+
+    body = signed_in.get("/").text
+
+    assert "all clear" not in body
+    assert "could not be verified" in body
+    assert "law.example" in body
+
+
+def test_the_run_report_flags_the_site_that_verified_nothing(signed_in, database):
+    run_id = _record_unverified_run(database)
+
+    body = signed_in.get(f"/runs/{run_id}").text
+
+    assert "verified nothing" in body
+    assert "nothing was verified" in body
+
+
+def test_a_genuinely_clean_run_still_reads_as_all_clear(signed_in, database):
+    from site_monitor.crawler import SiteResult
+    from site_monitor.elementor import PageResult
+
+    database.upsert_site(domain="good.example", pages=["https://good.example/a"])
+    run_id = database.start_run()
+    database.record_site_result(
+        run_id,
+        SiteResult(
+            domain="good.example",
+            pages=[PageResult(url="https://good.example/a", status_code=200,
+                              assets_checked=12, broken=())],
+            pages_found=1,
+        ),
+    )
+    database.finish_run(run_id, sites_checked=1, pages_checked=1,
+                        assets_checked=12, broken_assets=0, status="ok")
+
+    body = signed_in.get("/").text
+
+    assert "all clear" in body
+    assert "could not be verified" not in body

@@ -50,6 +50,12 @@ def format_site_section(site: SiteResult) -> list[str]:
             f"  ⚠️ {_esc(site.error)}",
         ]
 
+    if site.warning and not site.broken_pages:
+        return [
+            f"<b>{_esc(site.domain)}</b>",
+            f"  ⚠️ {_esc(site.warning)}",
+        ]
+
     broken_pages = site.broken_pages
     lines = [
         f"<b>{_esc(site.domain)}</b> — "

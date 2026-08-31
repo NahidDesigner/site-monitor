@@ -26,6 +26,7 @@ class SiteResult:
     pages: list[PageResult] = field(default_factory=list)
     duration_ms: int = 0
     error: str | None = None
+    warning: str | None = None
 
     @property
     def pages_checked(self) -> int:
@@ -48,9 +49,14 @@ class SiteResult:
         return sum(len(page.broken) for page in self.pages)
 
     @property
+    def pages_without_assets(self) -> int:
+        """Pages that loaded fine but referenced no Elementor stylesheet."""
+        return sum(1 for page in self.pages if not page.error and not page.assets_checked)
+
+    @property
     def has_findings(self) -> bool:
         """True when this site is worth alerting about."""
-        return bool(self.error) or bool(self.broken_pages)
+        return bool(self.error) or bool(self.warning) or bool(self.broken_pages)
 
 
 @dataclass
@@ -79,6 +85,30 @@ class RunResult:
     @property
     def has_findings(self) -> bool:
         return bool(self.sites_with_findings)
+
+
+def _blind_spot(result: SiteResult) -> str | None:
+    """Catch the case where a pass verified nothing but still looks clean.
+
+    Zero broken stylesheets is only good news if there were stylesheets to
+    judge. When every page loads but none of them reference
+    `elementor/css/`, this check has proved nothing at all -- and reporting
+    that as healthy is the same silent failure the tool exists to catch.
+
+    It happens for real reasons: Elementor switched to internal (inlined)
+    CSS, an optimisation plugin combined the stylesheets under its own
+    cache directory, or the pages being fetched are not the pages a browser
+    gets. All of them need a human to look, so say so rather than pass.
+    """
+    reachable = [page for page in result.pages if page.error is None]
+    if not reachable or result.assets_checked:
+        return None
+    return (
+        f"no Elementor stylesheets found on any of {len(reachable)} pages, "
+        "so nothing was verified -- Elementor may be inlining its CSS, an "
+        "optimisation plugin may be combining it, or these URLs may not be "
+        "serving the pages a browser sees"
+    )
 
 
 async def check_site(
@@ -128,7 +158,11 @@ async def check_site(
             return await check_page(fetcher, url, asset_semaphore=asset_semaphore)
 
     result.pages = list(await asyncio.gather(*(guarded(url) for url in page_urls)))
+    result.warning = _blind_spot(result)
     result.duration_ms = int((time.perf_counter() - started) * 1000)
+
+    if result.warning:
+        log.warning("%s: %s", site.domain, result.warning)
 
     log.info(
         "%s: %s broken stylesheets across %s pages (%s stylesheets checked, %sms)",

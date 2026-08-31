@@ -30,6 +30,11 @@ HTML error page, so the browser parses zero rules and the layout silently
 breaks with nothing in the console. A stylesheet is healthy only when it
 returns HTTP 200 AND a content type containing text/css.
 
+A site can also come back with a `warning` instead of a verdict: every page
+loaded, but none of them referenced an Elementor stylesheet, so the check had
+nothing to judge. Do not report those sites as healthy -- zero broken is only
+good news when something was actually checked.
+
 **PageSpeed.** Lighthouse performance history per site, mobile and desktop.
 
 Checks run in the background on the server: trigger one, then poll
@@ -230,7 +235,9 @@ def build_mcp_server(
 
     @server.tool(
         description="Every Elementor stylesheet broken in the most recent check, "
-        "grouped by site. This is the answer to 'what is broken right now'.",
+        "grouped by site. This is the answer to 'what is broken right now'. "
+        "Always read `not_verified` too: those sites had no stylesheets to "
+        "judge, so they are unproven rather than healthy.",
         annotations=READ,
     )
     async def current_breakages() -> dict:
@@ -240,6 +247,7 @@ def build_mcp_server(
                 return {"message": "No checks have run yet."}
             broken = database.broken_assets_for_run(latest["id"])
             errors = database.page_errors_for_run(latest["id"])
+            sites = database.site_runs_for_run(latest["id"])
 
         by_site: dict[str, list] = {}
         for row in broken:
@@ -257,6 +265,14 @@ def build_mcp_server(
             "by_site": by_site,
             "unreachable_pages": [
                 _row(e, "domain", "page_url", "error") for e in errors
+            ],
+            # Sites whose pages all loaded but referenced no Elementor
+            # stylesheet at all. Nothing was verified for these, so their
+            # absence from `by_site` is not evidence that they are healthy.
+            "not_verified": [
+                _row(s, "domain", "pages_checked", "warning")
+                for s in sites
+                if s["warning"]
             ],
         }
 
@@ -305,7 +321,7 @@ def build_mcp_server(
             ],
             "per_site": [
                 _row(s, "domain", "pages_checked", "assets_checked",
-                     "broken_assets", "duration_ms", "error")
+                     "broken_assets", "duration_ms", "error", "warning")
                 for s in sites
             ],
             "unreachable_pages": [

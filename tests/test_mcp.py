@@ -405,3 +405,77 @@ def test_the_slashless_path_is_still_authenticated(settings):
         )
 
     assert response.status_code == 401
+
+
+# -- a clean report is not the same as a verified one -------------------------
+
+
+async def _record_unverified_run(database) -> int:
+    """One site whose pages all loaded but referenced no Elementor CSS."""
+    from site_monitor.crawler import SiteResult
+    from site_monitor.elementor import PageResult
+
+    run_id = database.start_run()
+    database.record_site_result(
+        run_id,
+        SiteResult(
+            domain="law.example",
+            pages=[
+                PageResult(
+                    url="https://law.example/a",
+                    status_code=200,
+                    assets_checked=0,
+                    broken=(),
+                )
+            ],
+            pages_found=1,
+            warning="no Elementor stylesheets found on any of 1 pages, so nothing was verified",
+        ),
+    )
+    database.finish_run(run_id, sites_checked=1, pages_checked=1,
+                        assets_checked=0, broken_assets=0, status="ok")
+    return run_id
+
+
+async def test_current_breakages_says_when_nothing_was_verified(server, database):
+    await _record_unverified_run(database)
+
+    result = await call(server, "current_breakages")
+
+    # Nothing broken -- and that is precisely the misleading part.
+    assert result["broken_count"] == 0
+    assert result["by_site"] == {}
+    assert [row["domain"] for row in result["not_verified"]] == ["law.example"]
+    assert "nothing was verified" in result["not_verified"][0]["warning"]
+
+
+async def test_a_genuinely_clean_run_reports_nothing_unverified(server, database):
+    from site_monitor.crawler import SiteResult
+    from site_monitor.elementor import PageResult
+
+    run_id = database.start_run()
+    database.record_site_result(
+        run_id,
+        SiteResult(
+            domain="good.example",
+            pages=[PageResult(url="https://good.example/a", status_code=200,
+                              assets_checked=12, broken=())],
+            pages_found=1,
+        ),
+    )
+    database.finish_run(run_id, sites_checked=1, pages_checked=1,
+                        assets_checked=12, broken_assets=0, status="ok")
+
+    result = await call(server, "current_breakages")
+
+    assert result["not_verified"] == []
+
+
+async def test_get_report_carries_the_warning_per_site(server, database):
+    run_id = await _record_unverified_run(database)
+
+    result = await call(server, "get_report", run_id=run_id)
+
+    site = result["per_site"][0]
+    assert site["assets_checked"] == 0
+    assert "nothing was verified" in site["warning"]

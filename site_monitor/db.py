@@ -42,7 +42,8 @@ CREATE TABLE IF NOT EXISTS site_runs (
     broken_pages   INTEGER NOT NULL DEFAULT 0,
     broken_assets  INTEGER NOT NULL DEFAULT 0,
     duration_ms    INTEGER NOT NULL DEFAULT 0,
-    error          TEXT
+    error          TEXT,
+    warning        TEXT    NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS broken_assets (
@@ -182,6 +183,7 @@ class Database:
         ("pagespeed_runs", "trigger", "trigger TEXT NOT NULL DEFAULT ''"),
         ("pagespeed_runs", "expected", "expected INTEGER NOT NULL DEFAULT 0"),
         ("pagespeed_results", "report_url", "report_url TEXT NOT NULL DEFAULT ''"),
+        ("site_runs", "warning", "warning TEXT NOT NULL DEFAULT ''"),
     )
 
     def _migrate(self) -> None:
@@ -262,8 +264,9 @@ class Database:
                 """
                 INSERT INTO site_runs (
                     run_id, domain, sitemap, pages_found, pages_checked,
-                    assets_checked, broken_pages, broken_assets, duration_ms, error
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    assets_checked, broken_pages, broken_assets, duration_ms,
+                    error, warning
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     run_id,
@@ -276,6 +279,7 @@ class Database:
                     result.broken_asset_count,
                     result.duration_ms,
                     result.error,
+                    result.warning or "",
                 ),
             )
             site_run_id = int(cursor.lastrowid)

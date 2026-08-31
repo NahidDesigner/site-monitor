@@ -60,6 +60,16 @@
 </div>
 {% endif %}
 
+{% set blind = site_runs | selectattr('warning') | list %}
+{% if blind %}
+<div class="banner warn">
+  <strong>{{ blind|length }} site{{ 's' if blind|length != 1 else '' }} verified nothing.</strong>
+  Every page loaded, but none referenced an Elementor stylesheet, so a clean
+  result here does not mean the layout is fine — someone needs to look:
+  {{ blind | map(attribute='domain') | join(', ') }}
+</div>
+{% endif %}
+
 <div class="card">
   <h2>Per site</h2>
   <div class="tablewrap"><table>
@@ -69,10 +79,10 @@
     <tr>
       <td>{{ row['domain'] }}</td>
       <td class="num">{{ row['pages_checked'] }}</td>
-      <td class="num">{{ row['assets_checked'] }}</td>
+      <td class="num">{% if row['warning'] %}<strong style="color:var(--warn)">0</strong>{% else %}{{ row['assets_checked'] }}{% endif %}</td>
       <td class="num">{% if row['broken_assets'] %}<strong style="color:var(--bad)">{{ row['broken_assets'] }}</strong>{% else %}0{% endif %}</td>
       <td class="num">{{ (row['duration_ms']/1000)|round(1) }}s</td>
-      <td style="color:var(--warn);font-size:12.5px">{{ row['error'] or '' }}</td>
+      <td style="color:var(--warn);font-size:12.5px">{{ row['error'] or row['warning'] or '' }}</td>
     </tr>
     {% endfor %}
   </table></div>
