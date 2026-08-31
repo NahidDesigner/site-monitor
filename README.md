@@ -114,6 +114,39 @@ Anything saved in **Settings** overrides the matching environment variable.
 
 ---
 
+## Driving it from Claude (MCP)
+
+Set `MCP_TOKEN` and the app serves an MCP server at `/mcp`, so Claude can
+operate the monitor conversationally — "what's broken right now", "speed test
+dvlfirm.com", "show me last night's scheduled check". Without the token the
+endpoint is not mounted at all.
+
+```bash
+claude mcp add --transport http site-monitor https://monitor.example.com/mcp/ \
+  --header "Authorization: Bearer $MCP_TOKEN"
+```
+
+Sixteen tools across four groups:
+
+| | |
+|---|---|
+| **Sites** | `list_sites` `get_site` `add_site` `set_site_enabled` `remove_site` |
+| **Running** | `run_check` `run_pagespeed` `get_run_status` |
+| **Results** | `current_breakages` `list_reports` `get_report` `pagespeed_results` |
+| **Config** | `list_schedules` `create_schedule` `delete_schedule` `get_status` |
+
+Checks trigger in the background and share the same one-at-a-time lock as the
+dashboard, so a run started from Claude is the same run — no way to accidentally
+double the load on a monitored origin. Read-only and destructive tools are
+annotated as such, so a client can treat "remove a site" differently from
+"list them".
+
+`MCP_TOKEN` is separate from `DASHBOARD_PASSWORD` on purpose: it is handed to an
+AI client, so it should be revocable without locking you out. A dashboard session
+does not authenticate MCP, and the bearer token does not open the dashboard.
+
+---
+
 ## Schedules
 
 Schedules live in the app, not the platform. Add one in the dashboard with a
@@ -243,7 +276,7 @@ pip install -r requirements-dev.txt
 python -m pytest
 ```
 
-217 tests, no network access required — every HTTP interaction runs through
+308 tests, no network access required — every HTTP interaction runs through
 `httpx.MockTransport`, including a fixture that reproduces the dvlfirm.com
 breakage byte for byte.
 
@@ -265,6 +298,7 @@ site_monitor/
   notifier.py   Telegram formatting and delivery
   exports.py    CSV and Excel reports
   webapp/       the dashboard (FastAPI + Jinja templates)
+  mcp_server.py MCP tools over the same database and run manager
   cli.py        argparse entry points
 ```
 

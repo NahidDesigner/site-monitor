@@ -105,6 +105,10 @@ class Settings:
 
     timezone: str = "UTC"
 
+    # MCP. A separate credential from the dashboard password on purpose: it is
+    # handed to an AI client, so it should be revocable without locking you out.
+    mcp_token: str | None = None
+
     # Dashboard
     dashboard_password: str | None = None
     session_secret: str = ""
@@ -138,6 +142,7 @@ class Settings:
             pagespeed_api_key=os.getenv("PAGESPEED_API_KEY") or None,
             pagespeed_concurrency=_env_int("PAGESPEED_CONCURRENCY", 2),
             timezone=os.getenv("TIMEZONE", "UTC"),
+            mcp_token=os.getenv("MCP_TOKEN") or None,
             dashboard_password=os.getenv("DASHBOARD_PASSWORD") or None,
             # Without an explicit secret, sessions are signed with a key
             # derived from the password. That means changing the password
@@ -150,6 +155,11 @@ class Settings:
             # source of truth, so a missing file is not an error.
             sites=load_sites(sites_file) if sites_file.is_file() else (),
         )
+
+    @property
+    def mcp_enabled(self) -> bool:
+        """MCP is served only when a token exists to protect it."""
+        return bool(self.mcp_token)
 
     @property
     def telegram_enabled(self) -> bool:

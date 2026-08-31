@@ -4,6 +4,7 @@ results. Everything this tool does is reachable from a browser."""
 from __future__ import annotations
 
 import asyncio
+import hmac
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -134,6 +135,19 @@ def create_app(base_settings: Settings) -> FastAPI:
     scheduler = Scheduler(manager, base_settings)
     throttle = auth.LoginThrottle()
 
+    # Built before the lifespan closure so the closure can start it. A mounted
+    # sub-app's lifespan is not run by the parent, and this one needs its task
+    # group started or every request fails with "Task group is not initialized".
+    mcp_app = None
+    if base_settings.mcp_enabled:
+        from ..mcp_server import build_mcp_server
+
+        mcp_app = build_mcp_server(
+            base_settings, manager, current_settings
+        ).streamable_http_app(
+            streamable_http_path="/", stateless_http=True, json_response=True,
+        )
+
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         with db() as database:
@@ -151,13 +165,23 @@ def create_app(base_settings: Settings) -> FastAPI:
                     scheduler.reschedule(database, row["id"], row["cron"])
         scheduler.start()
         try:
-            yield
+            if mcp_app is not None:
+                async with mcp_app.router.lifespan_context(mcp_app):
+                    yield
+            else:
+                yield
         finally:
             await scheduler.stop()
 
     app = FastAPI(
         title="Site Monitor", docs_url=None, redoc_url=None, lifespan=lifespan
     )
+
+    # Mounted only when a token exists: an unauthenticated endpoint that can
+    # edit sites and start runs is not something to serve by accident.
+    if mcp_app is not None:
+        app.mount("/mcp", mcp_app)
+        log.info("MCP server mounted at /mcp")
     app.state.manager = manager
     app.state.scheduler = scheduler
 
@@ -183,6 +207,25 @@ def create_app(base_settings: Settings) -> FastAPI:
     @app.middleware("http")
     async def require_login(request: Request, call_next):
         if request.url.path in {"/login", "/healthz"}:
+            return await call_next(request)
+
+        # MCP authenticates with a bearer token rather than a browser session.
+        if request.url.path.startswith("/mcp"):
+            token = base_settings.mcp_token
+            supplied = request.headers.get("authorization", "")
+            prefix, _, value = supplied.partition(" ")
+            if (
+                not token
+                or prefix.lower() != "bearer"
+                or not hmac.compare_digest(value.strip(), token)
+            ):
+                client = request.client.host if request.client else "unknown"
+                log.warning("rejected MCP request from %s", client)
+                return JSONResponse(
+                    {"error": "unauthorized"},
+                    status_code=401,
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
             return await call_next(request)
         if not authed(request):
             if request.url.path.startswith("/api/"):
