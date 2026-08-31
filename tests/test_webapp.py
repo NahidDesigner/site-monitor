@@ -791,9 +791,11 @@ def test_the_dashboard_will_not_call_an_unverified_site_all_clear(signed_in, dat
 
     body = signed_in.get("/").text
 
-    assert "all clear" not in body
+    # Nothing IS broken on this site -- the point is that it is called out
+    # separately rather than being allowed to pass as a healthy result.
     assert "could not be verified" in body
     assert "law.example" in body
+    assert "Unverified" in body
 
 
 def test_the_run_report_flags_the_site_that_verified_nothing(signed_in, database):
@@ -825,5 +827,230 @@ def test_a_genuinely_clean_run_still_reads_as_all_clear(signed_in, database):
 
     body = signed_in.get("/").text
 
-    assert "all clear" in body
+    assert "nothing broken" in body
     assert "could not be verified" not in body
+
+
+# -- per-site state, not the latest run ---------------------------------------
+
+
+def _check(database, domain, *, broken=(), assets=10, warning="", trigger="manual"):
+    """Record one complete check of one site, as a run would."""
+    from site_monitor.crawler import SiteResult
+    from site_monitor.elementor import AssetResult, PageResult
+
+    pages = []
+    for page_url, asset_url in broken:
+        pages.append(
+            PageResult(
+                url=page_url,
+                status_code=200,
+                assets_checked=assets,
+                broken=(
+                    AssetResult(
+                        url=asset_url, status_code=404, content_type="text/html",
+                        ok=False, reason="HTTP 404", elapsed_ms=5,
+                    ),
+                ),
+            )
+        )
+    if not pages:
+        pages.append(
+            PageResult(url=f"https://{domain}/", status_code=200,
+                       assets_checked=assets, broken=())
+        )
+
+    run_id = database.start_run(trigger=trigger, scope=domain)
+    database.record_site_result(
+        run_id,
+        SiteResult(domain=domain, pages=pages, pages_found=len(pages),
+                   warning=warning or None),
+    )
+    database.finish_run(
+        run_id, sites_checked=1, pages_checked=len(pages),
+        assets_checked=assets, broken_assets=len(broken), status="ok",
+    )
+    return run_id
+
+
+BAD_PAGE = "https://one.example/broken/"
+BAD_CSS = "https://one.example/elementor/css/post-1.css?ver=111"
+
+
+def test_a_spot_check_does_not_erase_every_other_site_from_the_overview(
+    signed_in, database
+):
+    """The bug this covers: the dashboard read state off the latest run.
+
+    A single-site spot check IS the latest run, so every other site silently
+    dropped out of "broken right now" and the overview reported them fine
+    when they had simply not been looked at.
+    """
+    database.upsert_site(domain="one.example", pages=[BAD_PAGE])
+    database.upsert_site(domain="two.example", pages=["https://two.example/"])
+
+    _check(database, "one.example", broken=[(BAD_PAGE, BAD_CSS)])
+    _check(database, "two.example", trigger="site:two.example")  # the spot check
+
+    body = signed_in.get("/").text
+
+    # two.example was the latest run and is clean; one.example must survive it.
+    assert "one.example" in body
+    assert BAD_CSS in body
+
+
+def test_the_overview_counts_sites_never_checked(signed_in, database):
+    database.upsert_site(domain="seen.example", pages=["https://seen.example/"])
+    database.upsert_site(domain="unseen.example", pages=["https://unseen.example/"])
+    _check(database, "seen.example")
+
+    body = signed_in.get("/").text
+
+    assert "never been checked" in body
+    assert "unseen.example" in body
+
+
+# -- the site page ------------------------------------------------------------
+
+
+def test_the_site_page_shows_what_a_recheck_fixed(signed_in, database):
+    database.upsert_site(domain="one.example", pages=[BAD_PAGE])
+    _check(database, "one.example", broken=[(BAD_PAGE, BAD_CSS)])
+    _check(database, "one.example", broken=[(BAD_PAGE, BAD_CSS)])
+    _check(database, "one.example")  # fixed
+
+    body = signed_in.get("/sites/one.example").text
+
+    assert "1 fixed" in body
+    assert "still" in body  # the middle check was a repeat
+    assert "Every Elementor stylesheet resolved correctly" in body
+
+
+def test_the_site_page_labels_a_newly_broken_stylesheet(signed_in, database):
+    database.upsert_site(domain="one.example", pages=[BAD_PAGE])
+    _check(database, "one.example")
+    _check(database, "one.example", broken=[(BAD_PAGE, BAD_CSS)])
+
+    body = signed_in.get("/sites/one.example").text
+
+    assert "Broken right now" in body
+    assert BAD_CSS in body
+    assert ">new<" in body
+
+
+def test_the_site_page_handles_a_site_never_checked(signed_in, database):
+    database.upsert_site(domain="fresh.example", pages=["https://fresh.example/"])
+
+    body = signed_in.get("/sites/fresh.example").text
+
+    assert "never been checked" in body
+    assert "never checked" in body  # the health badge
+
+
+def test_an_unknown_site_redirects_rather_than_500ing(signed_in):
+    response = signed_in.get("/sites/nope.example", follow_redirects=False)
+
+    assert response.status_code in (302, 303, 307)
+    assert "/sites" in response.headers["location"]
+
+
+def test_sites_new_is_not_swallowed_by_the_domain_route(signed_in):
+    """/sites/new must keep matching its own page, not read as a domain."""
+    body = signed_in.get("/sites/new").text
+
+    assert "<form" in body
+    assert "never been checked" not in body
+
+
+def test_the_site_page_requires_a_login(client):
+    response = client.get("/sites/one.example", follow_redirects=False)
+
+    assert response.status_code in (302, 303, 307)
+    assert response.headers["location"] == "/login"
+
+
+def test_the_oldest_visible_check_is_still_compared_against_older_history(
+    signed_in, database
+):
+    """A window boundary must not turn an old check into a "first check".
+
+    The page fetches one check beyond the window purely as a comparison base;
+    without it the oldest visible row would claim there was nothing before it.
+    """
+    database.upsert_site(domain="one.example", pages=[BAD_PAGE])
+    _check(database, "one.example", broken=[(BAD_PAGE, BAD_CSS)])  # oldest
+    _check(database, "one.example", broken=[(BAD_PAGE, BAD_CSS)])
+    _check(database, "one.example", broken=[(BAD_PAGE, BAD_CSS)])
+
+    body = signed_in.get("/sites/one.example?limit=2").text
+
+    # Two rows shown, and neither is the site's genuine first check.
+    assert "first check" not in body
+    assert body.count("still") >= 2
+
+
+def test_a_genuine_first_check_still_says_so(signed_in, database):
+    database.upsert_site(domain="one.example", pages=[BAD_PAGE])
+    _check(database, "one.example", broken=[(BAD_PAGE, BAD_CSS)])
+
+    body = signed_in.get("/sites/one.example").text
+
+    assert "first check" in body
+
+
+def test_the_schedules_page_links_each_schedule_to_the_runs_it_produced(
+    signed_in, database
+):
+    database.upsert_site(domain="one.example", pages=[BAD_PAGE])
+    database.create_schedule(
+        name="nightly", kind="check", cron="0 3 * * *", enabled=True
+    )
+    run_id = _check(database, "one.example", trigger="schedule:nightly")
+
+    body = signed_in.get("/schedules").text
+
+    assert f'/runs/{run_id}' in body
+    assert "has not fired yet" not in body
+
+
+def test_a_schedule_that_never_fired_says_so(signed_in, database):
+    database.create_schedule(
+        name="weekly", kind="check", cron="0 3 * * 1", enabled=True
+    )
+
+    body = signed_in.get("/schedules").text
+
+    assert "has not fired yet" in body
+
+
+def test_the_overview_does_not_list_every_unreachable_page_in_the_fleet(
+    signed_in, database
+):
+    """With 50 sites this table would bury everything below it."""
+    from site_monitor.crawler import SiteResult
+    from site_monitor.elementor import PageResult
+
+    database.upsert_site(domain="stale.example", pages=["https://stale.example/"])
+    run_id = database.start_run(trigger="manual", scope="stale.example")
+    database.record_site_result(
+        run_id,
+        SiteResult(
+            domain="stale.example",
+            pages_found=30,
+            pages=[
+                PageResult(url=f"https://stale.example/{n}/", status_code=404,
+                           assets_checked=0, broken=(),
+                           error="page returned HTTP 404")
+                for n in range(30)
+            ],
+        ),
+    )
+    database.finish_run(run_id, sites_checked=1, pages_checked=30,
+                        assets_checked=0, broken_assets=0, status="ok")
+
+    body = signed_in.get("/").text
+
+    assert "and 18 more" in body
+    assert "https://stale.example/29/" not in body
+    # The full list is still reachable, on the site's own page.
+    assert "https://stale.example/29/" in signed_in.get("/sites/stale.example").text

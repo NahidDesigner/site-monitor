@@ -1,12 +1,12 @@
 {% extends "base.html" %}
-{% from "_macros.html" import ago, source, site_of %}
+{% from "_macros.html" import ago, when, source, site_of, health %}
 {% block title %}Report {{ run['id'] }} · Site Monitor{% endblock %}
 {% block body %}
 <div class="head">
   <div>
     <h1>Report {{ run['id'] }}</h1>
     <p>{{ site_of(run['trigger'] or '', run['scope'] or '', run['sites_checked']) }}
-       · started {{ ago(run['started_at']) }}<br>
+       · started {{ when(run['started_at']) }}<br>
        {{ source(run['trigger'] or '', run['scope'] or '') }}</p>
   </div>
   <span class="spacer"></span>
@@ -35,7 +35,8 @@
   </div>
   {% for domain, rows in grouped.items() %}
   <div class="finding">
-    <h3>{{ domain }} <span class="pill bad">{{ rows|length }}</span></h3>
+    <h3><a href="/sites/{{ domain }}">{{ domain }}</a>
+        <span class="pill bad">{{ rows|length }}</span></h3>
     {% for row in rows %}
       <p class="pg" data-page-url="{{ row['page_url'] }}"><a href="{{ row['page_url'] }}" target="_blank" rel="noopener">{{ row['page_url'] }}</a></p>
       <p class="as" data-asset-url="{{ row['asset_url'] }}">{{ row['asset_url'] }}<br><span class="why">{{ row['reason'] }}</span></p>
@@ -66,18 +67,19 @@
   <strong>{{ blind|length }} site{{ 's' if blind|length != 1 else '' }} verified nothing.</strong>
   Every page loaded, but none referenced an Elementor stylesheet, so a clean
   result here does not mean the layout is fine — someone needs to look:
-  {{ blind | map(attribute='domain') | join(', ') }}
+  {% for row in blind %}<a href="/sites/{{ row['domain'] }}">{{ row['domain'] }}</a>{{ ', ' if not loop.last }}{% endfor %}
 </div>
 {% endif %}
 
 <div class="card">
   <h2>Per site</h2>
   <div class="tablewrap"><table>
-    <tr><th>Site</th><th class="num">Pages</th><th class="num">Stylesheets</th>
+    <tr><th>Site</th><th>Result</th><th class="num">Pages</th><th class="num">Stylesheets</th>
         <th class="num">Broken</th><th class="num">Took</th><th>Problem</th></tr>
     {% for row in site_runs %}
     <tr>
-      <td>{{ row['domain'] }}</td>
+      <td><a href="/sites/{{ row['domain'] }}">{{ row['domain'] }}</a></td>
+      <td>{{ health(row) }}</td>
       <td class="num">{{ row['pages_checked'] }}</td>
       <td class="num">{% if row['warning'] %}<strong style="color:var(--warn)">0</strong>{% else %}{{ row['assets_checked'] }}{% endif %}</td>
       <td class="num">{% if row['broken_assets'] %}<strong style="color:var(--bad)">{{ row['broken_assets'] }}</strong>{% else %}0{% endif %}</td>

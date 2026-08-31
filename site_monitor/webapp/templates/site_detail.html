@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+{% from "_macros.html" import banner, when, health, delta, source, runstate, score, ms %}
+{% block title %}{{ site['domain'] }} · Site Monitor{% endblock %}
+{% block body %}
+{{ banner(request.query_params.get('message'), request.query_params.get('error')) }}
+
+<div class="head">
+  <div>
+    <h1>{{ site['domain'] }}</h1>
+    <p>
+      {% if latest %}{{ health(latest.site_run) }}{% else %}{{ health(None) }}{% endif %}
+      · last checked {{ when(latest.site_run['started_at']) if latest else when(none) }}
+      · {{ pages|length }} page{{ '' if pages|length == 1 else 's' }} watched
+      {% if not site['enabled'] %}· <span class="pill off">paused</span>{% endif %}
+    </p>
+  </div>
+  <span class="spacer"></span>
+  <form method="post" action="/sites/{{ site['domain'] }}/check" style="display:inline">
+    <button class="btn btn-primary btn-sm" type="submit">Check now</button>
+  </form>
+  <form method="post" action="/sites/{{ site['domain'] }}/pagespeed" style="display:inline">
+    <button class="btn-sm" type="submit">Speed test</button>
+  </form>
+  <a class="btn btn-sm" href="/sites/edit/{{ site['domain'] }}">Edit</a>
+  <a class="btn btn-sm" href="/sites">All sites</a>
+</div>
+
+{# ---- what is wrong right now ------------------------------------------- #}
+{% if latest and latest.broken %}
+<div class="card">
+  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+    <h2 style="margin:0">Broken right now</h2>
+    {{ delta(latest.delta) }}
+    <span class="spacer"></span>
+    <button class="btn-sm" type="button" data-copy="page">Copy page URLs</button>
+    <button class="btn-sm" type="button" data-copy="asset">Copy CSS URLs</button>
+  </div>
+  {% for row in latest.broken %}
+  <div class="finding">
+    <h3>
+      <a href="{{ row['page_url'] }}" target="_blank" rel="noopener">{{ row['page_url'] }}</a>
+      {% if latest.delta.compared %}
+        {% if (row['page_url'], row['asset_url']) in latest.delta.new_keys %}<span class="chip new">new</span>
+        {% else %}<span class="chip still">still broken</span>{% endif %}
+      {% endif %}
+    </h3>
+    <p class="pg" data-page-url="{{ row['page_url'] }}" hidden></p>
+    <p class="as" data-asset-url="{{ row['asset_url'] }}">{{ row['asset_url'] }}<br>
+      <span class="why">{{ row['reason'] }}</span></p>
+  </div>
+  {% endfor %}
+</div>
+{% elif latest and latest.site_run['warning'] %}
+<div class="banner warn">
+  <strong>Nothing was verified.</strong> {{ latest.site_run['warning'] }}
+</div>
+{% elif latest and latest.site_run['error'] %}
+<div class="banner err"><strong>The check failed.</strong> {{ latest.site_run['error'] }}</div>
+{% elif latest %}
+<div class="banner ok">
+  Every Elementor stylesheet resolved correctly
+  ({{ '{:,}'.format(latest.site_run['assets_checked']) }} checked across
+  {{ latest.site_run['pages_checked'] }} pages).
+  {% if latest.delta.fixed_count %}
+    <strong>{{ latest.delta.fixed_count }} fixed since the previous check.</strong>
+  {% endif %}
+</div>
+{% else %}
+<div class="card empty">
+  <p>This site has never been checked.</p>
+  <form method="post" action="/sites/{{ site['domain'] }}/check">
+    <button class="btn btn-primary" type="submit">Run the first check</button>
+  </form>
+</div>
+{% endif %}
+
+{# ---- pages that would not load ----------------------------------------- #}
+{% if page_errors %}
+<div class="card">
+  <h2>Pages that could not be reached <span class="pill bad">{{ page_errors|length }}</span></h2>
+  <p class="hint" style="margin-top:0">From the most recent check. These are usually
+     stale URLs in the page list rather than a fault on the site.</p>
+  <div class="tablewrap"><table>
+    <tr><th>Page</th><th>Problem</th></tr>
+    {% for row in page_errors %}
+    <tr><td class="u">{{ row['page_url'] }}</td><td>{{ row['error'] }}</td></tr>
+    {% endfor %}
+  </table></div>
+</div>
+{% endif %}
+
+{# ---- the history behind it --------------------------------------------- #}
+{% if entries %}
+<div class="card">
+  <h2>Check history</h2>
+  <p class="hint" style="margin-top:0">Each check compared with the one before it,
+     so a fix shows up as <span class="chip fixed">fixed</span> rather than
+     having to be spotted by eye.</p>
+  <ul class="tl">
+    {% for entry in entries %}
+    <li>
+      <div class="tl-when">
+        {{ when(entry.site_run['started_at']) }}<br>
+        {{ source(entry.site_run['trigger'] or '', entry.site_run['scope'] or '') }}
+      </div>
+      <div class="tl-meta">
+        {{ health(entry.site_run) }}
+        {{ delta(entry.delta) }}
+        {% if entry.site_run['warning'] %}
+          <div class="dim" style="margin-top:4px">{{ entry.site_run['warning'] }}</div>
+        {% elif entry.site_run['error'] %}
+          <div class="dim" style="margin-top:4px">{{ entry.site_run['error'] }}</div>
+        {% endif %}
+      </div>
+      <div class="tl-num">
+        {{ entry.site_run['pages_checked'] }} page{{ '' if entry.site_run['pages_checked'] == 1 else 's' }} ·
+        {{ '{:,}'.format(entry.site_run['assets_checked']) }} css ·
+        {{ (entry.site_run['duration_ms']/1000)|round(1) }}s<br>
+        <a href="/runs/{{ entry.site_run['run_id'] }}">report {{ entry.site_run['run_id'] }}</a>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+  {% if has_more %}
+  <p class="hint"><a href="/sites/{{ site['domain'] }}?limit={{ entries|length * 2 }}">Show more history</a></p>
+  {% endif %}
+</div>
+{% endif %}
+
+{# ---- speed ------------------------------------------------------------- #}
+{% if speed %}
+<div class="card">
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+    <h2 style="margin:0">PageSpeed</h2>
+    <span class="spacer"></span>
+    <a class="btn btn-sm" href="/pagespeed?domain={{ site['domain'] }}">All results</a>
+  </div>
+  <div class="tablewrap"><table>
+    <tr><th>Page</th><th>Tested</th>
+        <th class="num">Mobile</th><th class="num">Desktop</th>
+        <th class="num">LCP</th><th>Share</th></tr>
+    {% for row in speed %}
+    {% set m = row['mobile'] %}{% set d = row['desktop'] %}
+    <tr>
+      <td class="u" style="max-width:280px">
+        <a href="{{ row['url'] }}" target="_blank" rel="noopener">{{ row['url'] }}</a></td>
+      <td style="font-size:12px">{{ when(row['tested_at']) }}</td>
+      <td class="num">{% if m %}{{ score(m['performance']) }}{% else %}<span class="pill off">—</span>{% endif %}</td>
+      <td class="num">{% if d %}{{ score(d['performance']) }}{% else %}<span class="pill off">—</span>{% endif %}</td>
+      <td class="num">{{ ms(m['lcp_ms']) if m else (ms(d['lcp_ms']) if d else '—') }}</td>
+      <td style="white-space:nowrap">
+        {% if m and m['report_url'] %}<a class="btn btn-sm" href="{{ m['report_url'] }}" target="_blank" rel="noopener">Mobile</a>{% endif %}
+        {% if d and d['report_url'] %}<a class="btn btn-sm" href="{{ d['report_url'] }}" target="_blank" rel="noopener">Desktop</a>{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table></div>
+</div>
+{% endif %}
+{% endblock %}

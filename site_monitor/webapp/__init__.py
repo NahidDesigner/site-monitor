@@ -18,6 +18,7 @@ from fastapi.templating import Jinja2Templates
 from ..config import ConfigError, Settings, apply_overrides, load_sites
 from ..cron import CronError, describe, next_run, parse as parse_cron
 from ..db import Database
+from ..history import build_timeline
 from ..exports import (
     BROKEN_COLUMNS,
     PAGESPEED_COLUMNS,
@@ -114,6 +115,44 @@ def _transport_security(settings: Settings):
     )
 
 
+def _since_filter(value: str | None) -> str:
+    """How long ago, in the roughest unit that is still useful.
+
+    Paired with an absolute time rather than replacing it: "2h ago" answers
+    "is this current", the timestamp answers "which run was that" -- and
+    someone comparing a fix against a re-check needs both.
+    """
+    from datetime import datetime, timezone as _tz
+
+    if not value:
+        return ""
+    try:
+        moment = datetime.fromisoformat(str(value))
+    except ValueError:
+        return ""
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=_tz.utc)
+
+    seconds = (datetime.now(_tz.utc) - moment).total_seconds()
+    if seconds < 0:  # clock skew, or a schedule's next run
+        seconds = abs(seconds)
+        suffix = "from now"
+    else:
+        suffix = "ago"
+
+    # Rounded, not floored: 3h59m is far better described as "4h ago" than
+    # as "3h ago", and flooring makes a time 4 hours out read as 3.
+    for limit, divisor, unit in (
+        (90, 1, "s"),
+        (5400, 60, "m"),
+        (172800, 3600, "h"),
+        (2592000, 86400, "d"),
+    ):
+        if seconds < limit:
+            return f"{max(1, round(seconds / divisor))}{unit} {suffix}"
+    return f"{max(1, round(seconds / 2592000))}mo {suffix}"
+
+
 def _local_filter(tz_name: str):
     """Render a stored UTC timestamp in the timezone schedules are written in.
 
@@ -147,6 +186,7 @@ def _local_filter(tz_name: str):
 def create_app(base_settings: Settings) -> FastAPI:
     templates = Jinja2Templates(directory=str(TEMPLATES))
     templates.env.filters["local"] = _local_filter(base_settings.timezone or "UTC")
+    templates.env.filters["since"] = _since_filter
     templates.env.globals["tz_name"] = base_settings.timezone or "UTC"
 
     def db() -> Database:
@@ -351,13 +391,30 @@ def create_app(base_settings: Settings) -> FastAPI:
         with db() as database:
             sites = database.list_sites()
             latest = database.latest_run()
-            broken = database.broken_assets_for_run(latest["id"]) if latest else []
-            errors = database.page_errors_for_run(latest["id"]) if latest else []
-            unverified = (
-                [r for r in database.site_runs_for_run(latest["id"]) if r["warning"]]
-                if latest
-                else []
-            )
+
+            # Current state is read per site, never off the latest run. A spot
+            # check of one site IS the latest run, and reading state from it
+            # would drop the other 49 sites out of the overview entirely --
+            # reporting them as fine when they were simply not looked at.
+            states = database.latest_site_states()
+            configured = {site.domain for site in sites}
+            current = [
+                state for domain, state in states.items() if domain in configured
+            ]
+
+            broken = [
+                row
+                for state in current
+                if state["broken_assets"]
+                for row in database.broken_for_site_run(state["id"])
+            ]
+            errors = [
+                row
+                for state in current
+                for row in database.page_errors_for_site_run(state["id"])
+            ]
+            unverified = [state for state in current if state["warning"]]
+            never_checked = sorted(configured - set(states))
             recent = database.recent_runs(6)
             schedules = database.list_schedules()
             ps_latest = database.latest_pagespeed_run()
@@ -384,6 +441,9 @@ def create_app(base_settings: Settings) -> FastAPI:
             latest=latest,
             grouped=grouped,
             unverified=unverified,
+            never_checked=never_checked,
+            states=states,
+            checked_count=len(current),
             errors=errors,
             recent=recent,
             schedules=schedules,
@@ -464,6 +524,7 @@ def create_app(base_settings: Settings) -> FastAPI:
                 "sites.html",
                 active="sites",
                 sites=database.list_sites(),
+                states=database.latest_site_states(),
                 message=message,
                 error=error,
             )
@@ -490,6 +551,53 @@ def create_app(base_settings: Settings) -> FastAPI:
                 history=database.breakage_history(domain, 25),
                 error=None,
             )
+
+    @app.get("/sites/{domain}", response_class=HTMLResponse)
+    async def site_detail(request: Request, domain: str, limit: int = 25):
+        """One site's current state and the history behind it.
+
+        Declared after /sites/new and /sites/edit/... so those keep matching
+        their own literal paths rather than being read as a domain.
+        """
+        with db() as database:
+            row = database.get_site(domain)
+            if row is None:
+                return _redirect("/sites", error=f"No site called {domain}")
+
+            # One extra check beyond the window: it is never displayed, it
+            # only gives the oldest visible entry something to compare with.
+            # Without it the oldest row in every window claims to be a first
+            # check and its delta reads as "no history" rather than the truth.
+            history = database.site_history(domain, limit + 1)
+            broken_by_site_run = {
+                site_run["id"]: database.broken_for_site_run(site_run["id"])
+                for site_run in history
+            }
+            entries = build_timeline(history, broken_by_site_run)
+            if len(history) > limit:
+                entries = entries[:limit]
+
+            latest = entries[0] if entries else None
+            page_errors = (
+                database.page_errors_for_site_run(latest.site_run["id"])
+                if latest
+                else []
+            )
+            speed = database.pagespeed_pairs(domain=domain, limit=10)
+            pages = database.site_pages(row["id"])
+
+        return render(
+            request,
+            "site_detail.html",
+            active="sites",
+            site=dict(row),
+            pages=pages,
+            entries=entries,
+            latest=latest,
+            page_errors=page_errors,
+            speed=speed,
+            has_more=len(entries) >= limit,
+        )
 
     @app.post("/sites/save")
     async def site_save(
@@ -708,8 +816,11 @@ def create_app(base_settings: Settings) -> FastAPI:
         settings = current_settings()
         with db() as database:
             rows = [dict(row) for row in database.list_schedules()]
+            for row in rows:
+                row["runs"] = [dict(r) for r in database.runs_for_schedule(row["name"], 5)]
         for row in rows:
             row["description"] = describe(row["cron"])
+            row["last_run"] = row["runs"][0] if row["runs"] else None
         return render(
             request,
             "schedules.html",

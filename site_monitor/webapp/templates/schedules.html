@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import banner, ago %}
+{% from "_macros.html" import banner, ago, when, runstate %}
 {% block title %}Schedules · Site Monitor{% endblock %}
 {% block body %}
 {{ banner(message or request.query_params.get('message'), error or request.query_params.get('error')) }}
@@ -11,16 +11,35 @@
 {% if schedules %}
 <div class="card" style="padding:0">
   <div class="tablewrap"><table>
-    <tr><th>Name</th><th>What it runs</th><th>When</th><th>Next</th><th>Last</th><th></th></tr>
+    <tr><th>Name</th><th>What it runs</th><th>When</th><th>Next due</th>
+        <th>Runs it produced</th><th></th></tr>
     {% for row in schedules %}
     <tr>
       <td><strong>{{ row['name'] }}</strong>
           {% if not row['enabled'] %}<span class="pill off">paused</span>{% endif %}</td>
       <td>{{ 'PageSpeed test' if row['kind']=='pagespeed' else 'Elementor CSS check' }}</td>
       <td>{{ row['description'] }}<br><span class="mono" style="font-size:11.5px;color:var(--ink-faint)">{{ row['cron'] }}</span></td>
-      <td style="font-size:12px">{{ ago(row['next_run_at']) }}</td>
-      <td style="font-size:12px">{{ ago(row['last_run_at']) }}
-          {% if row['last_status'] %}<br><span style="color:var(--ink-faint)">{{ row['last_status'] }}</span>{% endif %}</td>
+      <td style="font-size:12px">{{ when(row['next_run_at']) }}</td>
+      <td style="font-size:12px">
+        {# The runs it actually produced, so "did it fire, and what came of
+           it" is answerable here instead of by hunting the Reports list. #}
+        {% if row['runs'] %}
+          {% for produced in row['runs'] %}
+          <div style="margin-bottom:3px;white-space:nowrap">
+            <a href="/runs/{{ produced['id'] }}">{{ when(produced['started_at']) }}</a>
+            {{ runstate(produced['status']) }}
+            {% if produced['broken_assets'] %}
+              <span class="chip new">{{ produced['broken_assets'] }} broken</span>
+            {% endif %}
+          </div>
+          {% endfor %}
+        {% elif row['last_run_at'] %}
+          {{ when(row['last_run_at']) }}
+          {% if row['last_status'] %}<br><span style="color:var(--ink-faint)">{{ row['last_status'] }}</span>{% endif %}
+        {% else %}
+          <span class="dim">has not fired yet</span>
+        {% endif %}
+      </td>
       <td style="text-align:right;white-space:nowrap">
         <form method="post" action="/schedules/{{ row['id'] }}/run" style="display:inline">
           <button class="btn-sm" type="submit">Run now</button></form>

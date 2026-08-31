@@ -868,3 +868,86 @@ class Database:
             )
         )
 
+
+    # -- per-site state and history ---------------------------------------
+    #
+    # Everything above answers "what happened in run N". These answer "what is
+    # the state of this site", which is the question actually being asked when
+    # someone fixes a client's page and re-checks it.
+
+    def latest_site_states(self) -> dict[str, sqlite3.Row]:
+        """The most recent check of *each* site, keyed by domain.
+
+        Not the same as the latest run. A spot check of one site is the latest
+        run, but it says nothing about the other 49 -- reading current state
+        off it would silently drop every site it did not touch.
+        """
+        rows = self._conn.execute(
+            """
+            SELECT sr.*, r.started_at, r.finished_at, r.status, r.trigger, r.scope
+              FROM site_runs sr
+              JOIN runs r ON r.id = sr.run_id
+              JOIN (
+                    SELECT domain, MAX(id) AS newest
+                      FROM site_runs
+                     GROUP BY domain
+                   ) latest
+                ON latest.newest = sr.id
+            """
+        )
+        return {row["domain"]: row for row in rows}
+
+    def site_history(self, domain: str, limit: int = 40) -> list[sqlite3.Row]:
+        """Every check of one site, newest first, with how it was triggered."""
+        return list(
+            self._conn.execute(
+                """
+                SELECT sr.*, r.started_at, r.finished_at, r.status,
+                       r.trigger, r.scope
+                  FROM site_runs sr
+                  JOIN runs r ON r.id = sr.run_id
+                 WHERE sr.domain = ?
+                 ORDER BY sr.id DESC
+                 LIMIT ?
+                """,
+                (domain, limit),
+            )
+        )
+
+    def broken_for_site_run(self, site_run_id: int) -> list[sqlite3.Row]:
+        return list(
+            self._conn.execute(
+                """
+                SELECT * FROM broken_assets
+                 WHERE site_run_id = ?
+                 ORDER BY page_url, asset_url
+                """,
+                (site_run_id,),
+            )
+        )
+
+    def page_errors_for_site_run(self, site_run_id: int) -> list[sqlite3.Row]:
+        return list(
+            self._conn.execute(
+                """
+                SELECT * FROM page_errors
+                 WHERE site_run_id = ?
+                 ORDER BY page_url
+                """,
+                (site_run_id,),
+            )
+        )
+
+    def runs_for_schedule(self, name: str, limit: int = 10) -> list[sqlite3.Row]:
+        """The runs one schedule actually produced, newest first."""
+        return list(
+            self._conn.execute(
+                """
+                SELECT * FROM runs
+                 WHERE trigger = ?
+                 ORDER BY id DESC
+                 LIMIT ?
+                """,
+                (f"schedule:{name}", limit),
+            )
+        )

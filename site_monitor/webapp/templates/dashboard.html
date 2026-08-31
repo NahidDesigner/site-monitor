@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import banner, ago, score, source, runstate, site_of %}
+{% from "_macros.html" import banner, ago, when, health, score, source, runstate, site_of %}
 {% block title %}Overview · Site Monitor{% endblock %}
 {% block body %}
 {{ banner(request.query_params.get('message'), request.query_params.get('error')) }}
@@ -21,42 +21,44 @@
 {% else %}
 
 <div class="tiles">
-  <div class="tile">
-    <div class="k">Last check</div>
-    <div class="v">{% if latest %}{{ latest['broken_assets'] }}{% else %}—{% endif %}</div>
-    <div class="s">{% if latest %}broken stylesheets{% else %}never run{% endif %}</div>
-  </div>
-  <div class="tile">
-    <div class="k">Pages checked</div>
-    <div class="v">{{ '{:,}'.format(latest['pages_checked']) if latest else '—' }}</div>
-    <div class="s">{{ '{:,}'.format(latest['assets_checked']) if latest else '' }}{% if latest %} stylesheets{% endif %}</div>
-  </div>
   <div class="tile {{ 'bad' if grouped else 'ok' }}">
-    <div class="k">Sites affected</div>
+    <div class="k">Sites broken</div>
     <div class="v">{{ grouped|length }}</div>
-    <div class="s">{% if grouped %}needs attention{% elif unverified %}nothing broken, but see below{% else %}all clear{% endif %}</div>
+    <div class="s">{% if grouped %}{{ broken|length }} broken stylesheets{% else %}nothing broken{% endif %}</div>
+  </div>
+  <div class="tile {{ 'warn' if unverified else '' }}">
+    <div class="k">Unverified</div>
+    <div class="v">{{ unverified|length }}</div>
+    <div class="s">nothing proven either way</div>
   </div>
   <div class="tile">
-    <div class="k">Last run at</div>
-    <div class="v" style="font-size:1rem;padding-top:8px">{{ ago(latest['started_at']) if latest else '—' }}</div>
-    <div class="s">{{ latest['status'] if latest else '' }}</div>
+    <div class="k">Coverage</div>
+    <div class="v">{{ checked_count }}<span style="font-size:1rem;color:var(--ink-faint)">/{{ enabled|length }}</span></div>
+    <div class="s">{% if never_checked %}{{ never_checked|length }} never checked{% else %}every site has been checked{% endif %}</div>
+  </div>
+  <div class="tile">
+    <div class="k">Last run</div>
+    <div class="v" style="font-size:.95rem;padding-top:9px">{{ when(latest['started_at']) if latest else when(none) }}</div>
+    <div class="s">{% if latest %}{{ source(latest['trigger'] or '', latest['scope'] or '') }}{% endif %}</div>
   </div>
 </div>
 
 {% if unverified %}
 <div class="banner warn">
   <strong>{{ unverified|length }} site{{ 's' if unverified|length != 1 else '' }} could not be verified.</strong>
-  Their pages loaded, but referenced no Elementor stylesheet, so this check
-  proved nothing about them either way:
-  {{ unverified | map(attribute='domain') | join(', ') }}.
-  <a href="/runs/{{ latest['id'] }}">See the report</a>
+  Their pages loaded, but referenced no Elementor stylesheet, so nothing has
+  been proven about them either way:
+  {% for row in unverified %}<a href="/sites/{{ row['domain'] }}">{{ row['domain'] }}</a>{{ ', ' if not loop.last }}{% endfor %}
 </div>
 {% endif %}
 
 {% if grouped %}
 <div class="card">
   <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px">
-    <h2 style="margin:0">Broken right now</h2>
+    <div>
+      <h2 style="margin:0">Broken right now</h2>
+      <p class="hint" style="margin:2px 0 0">Each site's most recent check, not one run.</p>
+    </div>
     <span class="spacer"></span>
     <button class="btn-sm" type="button" data-copy="page">Copy page URLs</button>
     <button class="btn-sm" type="button" data-copy="asset">Copy CSS URLs</button>
@@ -65,7 +67,9 @@
   </div>
   {% for domain, rows in grouped.items() %}
     <div class="finding">
-      <h3>{{ domain }} <span class="pill bad">{{ rows|length }} broken</span></h3>
+      <h3><a href="/sites/{{ domain }}">{{ domain }}</a>
+          <span class="pill bad">{{ rows|length }} broken</span>
+          <span class="dim">last checked {{ when(states[domain]['started_at']) }}</span></h3>
       {% set pages = {} %}
       {% for row in rows %}{% if pages.update({row['page_url']: pages.get(row['page_url'], []) + [row]}) %}{% endif %}{% endfor %}
       {% for page_url, items in pages.items() %}
@@ -78,23 +82,39 @@
     </div>
   {% endfor %}
 </div>
-{% elif latest %}
+{% elif checked_count %}
 <div class="card">
   <h2>Broken right now</h2>
   <p style="color:var(--ok);font-size:14px;margin:0">
-    Every Elementor stylesheet resolved correctly on the last run.</p>
+    Every Elementor stylesheet resolved correctly across all
+    {{ checked_count }} checked site{{ '' if checked_count == 1 else 's' }}.</p>
+</div>
+{% endif %}
+
+{% if never_checked %}
+<div class="banner info">
+  <strong>{{ never_checked|length }}
+  {{- ' sites have' if never_checked|length != 1 else ' site has' }} never been checked</strong>
+  — nothing is known about their state yet:
+  {% for domain in never_checked %}<a href="/sites/{{ domain }}">{{ domain }}</a>{{ ', ' if not loop.last }}{% endfor %}
 </div>
 {% endif %}
 
 {% if errors %}
 <div class="card">
-  <h2>Pages that could not be reached</h2>
+  <h2>Pages that could not be reached <span class="pill bad">{{ errors|length }}</span></h2>
+  <p class="hint" style="margin-top:0">Usually stale URLs in a page list rather
+     than a fault on the site. Open a site to see all of its own.</p>
   <div class="tablewrap"><table>
     <tr><th>Site</th><th>Page</th><th>Problem</th></tr>
-    {% for row in errors %}
-    <tr><td>{{ row['domain'] }}</td><td class="u">{{ row['page_url'] }}</td><td>{{ row['error'] }}</td></tr>
+    {% for row in errors[:12] %}
+    <tr><td><a href="/sites/{{ row['domain'] }}">{{ row['domain'] }}</a></td>
+        <td class="u">{{ row['page_url'] }}</td><td>{{ row['error'] }}</td></tr>
     {% endfor %}
   </table></div>
+  {% if errors|length > 12 %}
+  <p class="hint">…and {{ errors|length - 12 }} more, listed on each site's own page.</p>
+  {% endif %}
 </div>
 {% endif %}
 
@@ -110,7 +130,7 @@
           <th class="num">Pages</th><th class="num">Broken</th></tr>
       {% for row in recent %}
       <tr>
-        <td><a href="/runs/{{ row['id'] }}">{{ ago(row['started_at']) }}</a></td>
+        <td style="white-space:nowrap"><a href="/runs/{{ row['id'] }}">{{ when(row['started_at']) }}</a></td>
         <td>{{ site_of(row['trigger'] or '', row['scope'] or '', row['sites_checked']) }}<br>
             <span style="font-size:11px">{{ source(row['trigger'] or '', row['scope'] or '') }}</span></td>
         <td>{{ runstate(row['status']) }}</td>

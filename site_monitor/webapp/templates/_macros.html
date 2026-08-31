@@ -49,3 +49,35 @@
   {%- elif status == 'interrupted' -%}<span class="pill warn">interrupted</span>
   {%- else -%}<span class="pill bad">{{ status }}</span>{%- endif -%}
 {% endmacro %}
+
+{# Absolute time and elapsed time together. The timestamp says which check,
+   the elapsed says whether it is current -- comparing a fix against a
+   re-check needs both, so neither is shown without the other. #}
+{% macro when(value) %}
+  {%- if value -%}
+    <span class="mono">{{ value|local }}</span>
+    <span class="dim">· {{ value|since }}</span>
+  {%- else -%}<span class="dim">never</span>{%- endif -%}
+{% endmacro %}
+
+{# A site's current state in one word. `unverified` is deliberately amber and
+   distinct from both: it means nobody has proved anything either way. #}
+{% macro health(state) %}
+  {%- if state is none -%}<span class="pill off">never checked</span>
+  {%- elif state['error'] -%}<span class="pill bad">check failed</span>
+  {%- elif state['broken_assets'] -%}
+    <span class="pill bad">{{ state['broken_assets'] }} broken</span>
+  {%- elif state['warning'] -%}<span class="pill warn">unverified</span>
+  {%- else -%}<span class="pill ok">healthy</span>{%- endif -%}
+{% endmacro %}
+
+{# What changed since the previous check of the same site. #}
+{% macro delta(d) %}
+  {%- if not d.compared -%}<span class="dim">first check</span>
+  {%- else -%}
+    {%- if d.fixed_count %}<span class="chip fixed">{{ d.fixed_count }} fixed</span>{% endif -%}
+    {%- if d.new_count %}<span class="chip new">{{ d.new_count }} new</span>{% endif -%}
+    {%- if d.still_count %}<span class="chip still">{{ d.still_count }} still</span>{% endif -%}
+    {%- if d.is_quiet and not d.still_count %}<span class="dim">no change</span>{% endif -%}
+  {%- endif -%}
+{% endmacro %}

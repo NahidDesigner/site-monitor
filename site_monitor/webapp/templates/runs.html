@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import banner, ago, source as src_of, runstate, site_of %}
+{% from "_macros.html" import banner, ago, when, source as src_of, runstate, site_of %}
 {% block title %}Reports · Site Monitor{% endblock %}
 {% block body %}
 {{ banner(request.query_params.get('message'), request.query_params.get('error')) }}
@@ -38,8 +38,12 @@
         <th class="num">Pages</th><th class="num">Stylesheets</th>
         <th class="num">Broken</th><th></th></tr>
     {% for row in runs %}
+    {% set day = (row['started_at']|local('%d %b %Y')) %}
+    {% if loop.first or day != (loop.previtem['started_at']|local('%d %b %Y')) %}
+    <tr class="daybreak"><td colspan="8">{{ day }}</td></tr>
+    {% endif %}
     <tr>
-      <td>{{ ago(row['started_at']) }}</td>
+      <td style="white-space:nowrap">{{ when(row['started_at']) }}</td>
       <td>{{ site_of(row['trigger'] or '', row['scope'] or '', row['sites_checked']) }}</td>
       {% if source == 'all' %}<td style="white-space:nowrap">{{ src_of(row['trigger'] or '', row['scope'] or '') }}</td>{% endif %}
       <td>{{ runstate(row['status']) }}</td>
