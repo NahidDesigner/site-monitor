@@ -54,20 +54,43 @@
         </select>
       </div>
       <div class="field">
-        <label for="cron">When</label>
-        <input id="cron" name="cron" type="text" value="0 */6 * * *" required list="presets">
-        <datalist id="presets">
-          <option value="0 * * * *">Every hour</option>
-          <option value="0 */2 * * *">Every 2 hours</option>
-          <option value="0 */4 * * *">Every 4 hours</option>
-          <option value="0 */6 * * *">Every 6 hours</option>
-          <option value="0 */12 * * *">Every 12 hours</option>
-          <option value="0 3 * * *">Every day at 3am</option>
-          <option value="0 0 * * 1">Every Monday</option>
-        </datalist>
-        <p class="hint">Cron format: minute hour day month weekday. Start typing for presets.</p>
+        <label for="cron">How often</label>
+        <select id="cron" name="cron">
+          <optgroup label="Every few hours">
+            <option value="0 * * * *">Every hour</option>
+            <option value="0 */2 * * *">Every 2 hours</option>
+            <option value="0 */3 * * *">Every 3 hours</option>
+            <option value="0 */4 * * *">Every 4 hours</option>
+            <option value="0 */6 * * *" selected>Every 6 hours</option>
+            <option value="0 */12 * * *">Every 12 hours</option>
+          </optgroup>
+          <optgroup label="Once a day">
+            <option value="0 0 * * *">Every day at midnight</option>
+            <option value="0 3 * * *">Every day at 3:00am</option>
+            <option value="0 6 * * *">Every day at 6:00am</option>
+            <option value="0 9 * * *">Every day at 9:00am</option>
+            <option value="0 18 * * *">Every day at 6:00pm</option>
+          </optgroup>
+          <optgroup label="Once a week">
+            <option value="0 3 * * 1">Every Monday at 3:00am</option>
+            <option value="0 3 * * 6">Every Saturday at 3:00am</option>
+            <option value="0 3 * * 0">Every Sunday at 3:00am</option>
+          </optgroup>
+          <optgroup label="Something else">
+            <option value="custom">Custom schedule…</option>
+          </optgroup>
+        </select>
+        <p class="hint">Times are {{ tz }}.</p>
       </div>
     </div>
+    <div class="field" id="custom-cron" hidden>
+      <label for="cron_custom">Custom schedule</label>
+      <input id="cron_custom" name="cron_custom" type="text" placeholder="0 */6 * * *">
+      <p class="hint">Cron format — five values: minute, hour, day of month, month,
+         day of week. <code>0 */6 * * *</code> means "at minute 0, every 6th hour".
+         Leave this empty to use the dropdown above.</p>
+    </div>
+
     <label class="check" style="margin-bottom:16px">
       <input type="checkbox" name="enabled" value="1" checked> Active</label><br>
     <button class="btn-primary" type="submit">Add schedule</button>
@@ -83,3 +106,19 @@
     <strong>15 requests per page</strong>, so the cost scales with how many pages you watch.</p>
 </div>
 {% endblock %}
+
+<script>
+(function(){
+  var select = document.getElementById('cron');
+  var custom = document.getElementById('custom-cron');
+  var field  = document.getElementById('cron_custom');
+  if(!select || !custom) return;
+  function sync(){
+    var isCustom = select.value === 'custom';
+    custom.hidden = !isCustom;
+    if(field) field.required = isCustom;
+  }
+  select.addEventListener('change', sync);
+  sync();
+})();
+</script>

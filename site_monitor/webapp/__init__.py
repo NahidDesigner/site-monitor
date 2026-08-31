@@ -564,10 +564,18 @@ def create_app(base_settings: Settings) -> FastAPI:
         name: str = Form(""),
         kind: str = Form("css_check"),
         cron: str = Form(""),
+        cron_custom: str = Form(""),
         enabled: str = Form(""),
     ):
         name = name.strip() or "Untitled schedule"
-        cron = cron.strip()
+        # The dropdown posts a ready-made expression; "Custom schedule" posts
+        # the sentinel and the typed value comes through separately. Reading
+        # both means the form still works with JavaScript disabled.
+        cron = (cron_custom.strip() or cron).strip()
+        if cron == "custom":
+            return _redirect(
+                "/schedules", error="Enter a custom schedule, or pick one from the list"
+            )
         if kind not in {"css_check", "pagespeed"}:
             kind = "css_check"
         try:
@@ -657,6 +665,7 @@ def create_app(base_settings: Settings) -> FastAPI:
         max_pages_per_site: str = Form(""),
         user_agent: str = Form(""),
         pagespeed_strategies: str = Form(""),
+        pagespeed_concurrency: str = Form(""),
     ):
         values = {
             "telegram_bot_token": telegram_bot_token,
@@ -670,9 +679,10 @@ def create_app(base_settings: Settings) -> FastAPI:
             "max_pages_per_site": max_pages_per_site,
             "user_agent": user_agent,
             "pagespeed_strategies": pagespeed_strategies,
+            "pagespeed_concurrency": pagespeed_concurrency,
         }
         for key in ("site_concurrency", "page_concurrency", "asset_concurrency",
-                    "max_retries", "max_pages_per_site"):
+                    "max_retries", "max_pages_per_site", "pagespeed_concurrency"):
             raw = values[key].strip()
             if raw and not raw.lstrip("-").isdigit():
                 return _redirect("/settings", error=f"{key} needs to be a whole number")

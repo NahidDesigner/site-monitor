@@ -319,3 +319,35 @@ async def test_a_full_run_still_skips_paused_sites(tmp_path, monkeypatch):
     await manager._task
 
     assert checked == ["on.com"]
+
+
+async def test_the_stored_trigger_says_where_a_run_came_from(tmp_path, monkeypatch):
+    """Reports has to distinguish a scheduled sweep from a button press."""
+    seed(tmp_path)
+    manager = RunManager(settings_for(tmp_path))
+    real = runner_module.run_checks
+
+    async def patched(settings, *, transport=None, on_site_complete=None):
+        return await real(
+            settings,
+            transport=httpx.MockTransport(handler),
+            on_site_complete=on_site_complete,
+        )
+
+    monkeypatch.setattr(runner_module, "run_checks", patched)
+
+    await manager.trigger(trigger="schedule:Nightly")
+    await manager._task
+
+    with Database(tmp_path / "run.db") as database:
+        row = database.latest_run()
+    assert row["trigger"] == "schedule:Nightly"
+    assert row["scope"] == "a.com"
+
+
+def test_scope_names_one_site_but_counts_many():
+    from site_monitor.config import Site
+    from site_monitor.runner import describe_scope
+
+    assert describe_scope([Site(domain="a.com")]) == "a.com"
+    assert describe_scope([Site(domain="a.com"), Site(domain="b.com")]) == "2 sites"

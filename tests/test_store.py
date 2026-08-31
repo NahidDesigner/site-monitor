@@ -218,3 +218,56 @@ def test_completed_runs_are_left_alone(database):
 
 def test_closing_orphans_is_safe_when_there_are_none(database):
     assert database.close_orphaned_runs() == 0
+
+
+# -- what started a run -------------------------------------------------------
+
+
+def test_a_run_records_what_triggered_it_and_what_it_covered(database):
+    run_id = database.start_run(trigger="schedule:Every 6h", scope="53 sites")
+
+    row = database.run(run_id)
+    assert row["trigger"] == "schedule:Every 6h"
+    assert row["scope"] == "53 sites"
+
+
+def test_a_pagespeed_run_records_its_trigger_and_expected_count(database):
+    run_id = database.start_pagespeed_run(trigger="dashboard", expected=106)
+
+    row = database.pagespeed_runs(1)[0]
+    assert row["trigger"] == "dashboard"
+    assert row["expected"] == 106
+
+
+def test_columns_are_added_to_a_database_created_before_they_existed(tmp_path):
+    """Anyone already running this must not lose their history to an upgrade."""
+    import sqlite3
+
+    path = tmp_path / "old.db"
+    con = sqlite3.connect(path)
+    con.executescript(
+        """
+        CREATE TABLE runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, started_at TEXT NOT NULL,
+            finished_at TEXT, status TEXT NOT NULL DEFAULT 'running',
+            sites_checked INTEGER NOT NULL DEFAULT 0,
+            pages_checked INTEGER NOT NULL DEFAULT 0,
+            assets_checked INTEGER NOT NULL DEFAULT 0,
+            broken_assets INTEGER NOT NULL DEFAULT 0, error TEXT);
+        INSERT INTO runs (started_at, status, pages_checked)
+        VALUES ('2026-08-30T23:00:00+00:00', 'completed', 45);
+        """
+    )
+    con.commit()
+    con.close()
+
+    with Database(path) as db:
+        rows = db.recent_runs(5)
+        assert len(rows) == 1
+        assert rows[0]["pages_checked"] == 45      # history intact
+        assert rows[0]["trigger"] == ""            # column added, empty default
+        db.start_run(trigger="dashboard", scope="1 site")
+
+    # Reopening must not try to add the columns twice.
+    with Database(path) as db:
+        assert len(db.recent_runs(5)) == 2

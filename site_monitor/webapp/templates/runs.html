@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import banner, ago %}
+{% from "_macros.html" import banner, ago, source, runstate, site_of %}
 {% block title %}Reports · Site Monitor{% endblock %}
 {% block body %}
 {{ banner(request.query_params.get('message'), request.query_params.get('error')) }}
@@ -13,15 +13,15 @@
 {% if runs %}
 <div class="card" style="padding:0">
   <div class="tablewrap"><table>
-    <tr><th>Started</th><th>Status</th><th class="num">Sites</th><th class="num">Pages</th>
-        <th class="num">Stylesheets</th><th class="num">Broken</th><th></th></tr>
+    <tr><th>Started</th><th>Website</th><th>Source</th><th>Status</th>
+        <th class="num">Pages</th><th class="num">Stylesheets</th>
+        <th class="num">Broken</th><th></th></tr>
     {% for row in runs %}
     <tr>
       <td>{{ ago(row['started_at']) }}</td>
-      <td>{% if row['status']=='completed' %}<span class="pill ok">done</span>
-          {% elif row['status']=='running' %}<span class="pill warn">running</span>
-          {% else %}<span class="pill bad">{{ row['status'] }}</span>{% endif %}</td>
-      <td class="num">{{ row['sites_checked'] }}</td>
+      <td>{{ site_of(row['trigger'] or '', row['scope'] or '', row['sites_checked']) }}</td>
+      <td style="white-space:nowrap">{{ source(row['trigger'] or '', row['scope'] or '') }}</td>
+      <td>{{ runstate(row['status']) }}</td>
       <td class="num">{{ '{:,}'.format(row['pages_checked']) }}</td>
       <td class="num">{{ '{:,}'.format(row['assets_checked']) }}</td>
       <td class="num">{% if row['broken_assets'] %}<strong style="color:var(--bad)">{{ row['broken_assets'] }}</strong>

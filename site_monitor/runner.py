@@ -85,15 +85,23 @@ class RunProgress:
         return data
 
 
+def describe_scope(sites: list[Site]) -> str:
+    """A short label for what a run covered, for the reports list."""
+    if len(sites) == 1:
+        return sites[0].domain
+    return f"{len(sites)} sites"
+
+
 async def execute_run(
     settings: Settings,
     database: Database,
     sites: list[Site],
     *,
+    trigger: str = "",
     on_site: "callable | None" = None,
 ) -> tuple[RunResult, int]:
     """Run the checks, persisting each site's result as it lands."""
-    run_id = database.start_run()
+    run_id = database.start_run(trigger=trigger, scope=describe_scope(sites))
     scoped = Settings(**{**settings.__dict__, "sites": tuple(sites)})
 
     def record(result: SiteResult) -> None:
@@ -267,7 +275,11 @@ class RunManager:
                     progress.current = result.domain
 
                 run, run_id = await execute_run(
-                    self._settings, database, sites, on_site=on_site
+                    self._settings,
+                    database,
+                    sites,
+                    trigger=progress.trigger,
+                    on_site=on_site,
                 )
                 progress.run_id = run_id
 
@@ -329,6 +341,7 @@ class RunManager:
                     database,
                     sites,
                     strategies=strategies,
+                    trigger=progress.trigger,
                     on_result=on_result,
                 )
                 progress.run_id = run_id

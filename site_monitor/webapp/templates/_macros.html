@@ -13,3 +13,39 @@
 {% endmacro %}
 
 {% macro ms(value) %}{% if value is none %}—{% else %}{{ (value/1000)|round(2) }}s{% endif %}{% endmacro %}
+
+{# Which website(s) a run covered. #}
+{% macro site_of(trigger, scope, sites_checked) %}
+  {%- if trigger and trigger.startswith('site:') -%}
+    <strong>{{ trigger[5:] }}</strong>
+  {%- elif scope and ' sites' not in scope -%}
+    <strong>{{ scope }}</strong>
+  {%- elif scope -%}
+    <span style="color:var(--ink-soft)">{{ scope }}</span>
+  {%- elif sites_checked -%}
+    <span style="color:var(--ink-soft)">{{ sites_checked }} site{{ '' if sites_checked == 1 else 's' }}</span>
+  {%- else -%}
+    <span style="color:var(--ink-faint)">—</span>
+  {%- endif -%}
+{% endmacro %}
+
+{# What started it: a schedule, a button, or a single-site spot check. #}
+{% macro source(trigger, scope) %}
+  {%- if trigger and trigger.startswith('schedule:') -%}
+    <span class="pill sched">Scheduled</span>
+    <span class="src-name">{{ trigger[9:] }}</span>
+  {%- elif trigger and trigger.startswith('site:') -%}
+    <span class="pill single">Spot check</span>
+  {%- elif trigger -%}
+    <span class="pill manual">Manual</span>
+  {%- else -%}
+    <span class="pill off">—</span>
+  {%- endif -%}
+{% endmacro %}
+
+{% macro runstate(status) %}
+  {%- if status == 'completed' -%}<span class="pill ok">done</span>
+  {%- elif status == 'running' -%}<span class="pill warn">running</span>
+  {%- elif status == 'interrupted' -%}<span class="pill warn">interrupted</span>
+  {%- else -%}<span class="pill bad">{{ status }}</span>{%- endif -%}
+{% endmacro %}

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import banner, ago, score %}
+{% from "_macros.html" import banner, ago, score, source, runstate, site_of %}
 {% block title %}Overview · Site Monitor{% endblock %}
 {% block body %}
 {{ banner(request.query_params.get('message'), request.query_params.get('error')) }}
@@ -96,13 +96,14 @@
     </div>
     {% if recent %}
     <div class="tablewrap"><table>
-      <tr><th>When</th><th>Status</th><th class="num">Pages</th><th class="num">Broken</th></tr>
+      <tr><th>When</th><th>Website</th><th>Status</th>
+          <th class="num">Pages</th><th class="num">Broken</th></tr>
       {% for row in recent %}
       <tr>
         <td><a href="/runs/{{ row['id'] }}">{{ ago(row['started_at']) }}</a></td>
-        <td>{% if row['status']=='completed' %}<span class="pill ok">done</span>
-            {% elif row['status']=='running' %}<span class="pill warn">running</span>
-            {% else %}<span class="pill bad">{{ row['status'] }}</span>{% endif %}</td>
+        <td>{{ site_of(row['trigger'] or '', row['scope'] or '', row['sites_checked']) }}<br>
+            <span style="font-size:11px">{{ source(row['trigger'] or '', row['scope'] or '') }}</span></td>
+        <td>{{ runstate(row['status']) }}</td>
         <td class="num">{{ '{:,}'.format(row['pages_checked']) }}</td>
         <td class="num">{{ row['broken_assets'] }}</td>
       </tr>

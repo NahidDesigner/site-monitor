@@ -1,11 +1,13 @@
 {% extends "base.html" %}
-{% from "_macros.html" import ago %}
+{% from "_macros.html" import ago, source, site_of %}
 {% block title %}Report {{ run['id'] }} · Site Monitor{% endblock %}
 {% block body %}
 <div class="head">
   <div>
     <h1>Report {{ run['id'] }}</h1>
-    <p>Started {{ ago(run['started_at']) }} · {{ run['status'] }}</p>
+    <p>{{ site_of(run['trigger'] or '', run['scope'] or '', run['sites_checked']) }}
+       · started {{ ago(run['started_at']) }}<br>
+       {{ source(run['trigger'] or '', run['scope'] or '') }}</p>
   </div>
   <span class="spacer"></span>
   <a class="btn btn-sm" href="/export/broken.csv?run_id={{ run['id'] }}">Download CSV</a>

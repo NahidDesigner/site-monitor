@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import banner, ago, score, ms %}
+{% from "_macros.html" import banner, ago, score, ms, source, runstate %}
 {% block title %}PageSpeed · Site Monitor{% endblock %}
 {% macro sortlink(key, label) %}
   {% set flip = 'asc' if (sort == key and dir == 'desc') else 'desc' %}
@@ -19,10 +19,44 @@
   </form>
 </div>
 
+{% set latest = runs[0] if runs else None %}
+{% if latest %}
+<div class="card" style="padding:14px 18px">
+  <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center;font-size:13.5px">
+    <strong>Latest sweep</strong>
+    {{ runstate(latest['status']) }}
+    {{ source(latest['trigger'] or '', '') }}
+    <span class="spacer"></span>
+    <span class="mono" style="color:var(--ink-soft)">
+      {{ latest['urls_tested'] }}{% if latest['expected'] %} of {{ latest['expected'] }}{% endif %} tested
+      {%- if latest['failures'] %} · <span style="color:var(--bad)">{{ latest['failures'] }} failed</span>{% endif %}
+      · {{ ago(latest['started_at']) }}
+    </span>
+  </div>
+  {% if latest['status'] == 'interrupted' %}
+  <p class="hint" style="color:var(--warn);margin:10px 0 0">
+    This sweep was cut short because the app restarted — a redeploy, or the container
+    being replaced. Nothing was lost except the untested URLs; press <strong>Test now</strong>
+    to finish the job.</p>
+  {% elif latest['status'] == 'running' %}
+  <p class="hint" style="margin:10px 0 0">
+    Still going. A full Lighthouse audit takes 20–40 seconds per URL, so a sweep of every
+    site takes a while — you can close this page, it keeps running on the server.</p>
+  {% elif latest['error'] %}
+  <p class="hint" style="color:var(--bad);margin:10px 0 0">{{ latest['error'] }}</p>
+  {% elif latest['expected'] and latest['urls_tested'] < latest['expected'] %}
+  <p class="hint" style="color:var(--warn);margin:10px 0 0">
+    Finished with fewer results than expected ({{ latest['urls_tested'] }} of
+    {{ latest['expected'] }}).</p>
+  {% endif %}
+</div>
+{% endif %}
+
 {% if not configured %}
 <div class="banner info">
-  No PageSpeed API key set. Tests still run without one but Google rate-limits
-  them heavily — add a key under <a href="/settings">Settings</a>.
+  No PageSpeed API key set. Google rate-limits unauthenticated tests hard, so a
+  full sweep will be slow and some URLs will fail. Add a key under
+  <a href="/settings">Settings</a> — then you can also raise how many run at once.
 </div>
 {% endif %}
 

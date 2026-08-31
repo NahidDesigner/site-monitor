@@ -99,6 +99,9 @@ class Settings:
     # PageSpeed Insights
     pagespeed_api_key: str | None = None
     pagespeed_strategies: tuple[str, ...] = ("mobile", "desktop")
+    # A full Lighthouse audit takes 20-40s per URL, so this decides whether a
+    # 53-site sweep takes 5 minutes or 30. Raise it only with an API key.
+    pagespeed_concurrency: int = 2
 
     timezone: str = "UTC"
 
@@ -133,6 +136,7 @@ class Settings:
             log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
             dry_run=_env_bool("DRY_RUN", False),
             pagespeed_api_key=os.getenv("PAGESPEED_API_KEY") or None,
+            pagespeed_concurrency=_env_int("PAGESPEED_CONCURRENCY", 2),
             timezone=os.getenv("TIMEZONE", "UTC"),
             dashboard_password=os.getenv("DASHBOARD_PASSWORD") or None,
             # Without an explicit secret, sessions are signed with a key
@@ -235,6 +239,7 @@ _OVERRIDE_CASTS = {
     "max_retries": int,
     "max_pages_per_site": int,
     "request_timeout": float,
+    "pagespeed_concurrency": int,
 }
 
 

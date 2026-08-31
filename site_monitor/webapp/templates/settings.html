@@ -55,6 +55,14 @@
       </select>
       <p class="hint">Each device doubles the number of API calls.</p>
     </div>
+    <div class="field">
+      <label for="pagespeed_concurrency">Tests at once</label>
+      <input id="pagespeed_concurrency" name="pagespeed_concurrency" type="number" min="1" max="20"
+             placeholder="{{ settings.pagespeed_concurrency }}" value="{{ stored.get('pagespeed_concurrency','') }}">
+      <p class="hint">Each Lighthouse audit takes 20–40 seconds, so this decides whether a
+         full sweep takes 5 minutes or 30. With an API key Google allows 240 a minute,
+         so 6 is comfortable; without one, leave it at 2.</p>
+    </div>
   </div>
 </div>
 

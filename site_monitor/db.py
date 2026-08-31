@@ -26,7 +26,9 @@ CREATE TABLE IF NOT EXISTS runs (
     pages_checked  INTEGER NOT NULL DEFAULT 0,
     assets_checked INTEGER NOT NULL DEFAULT 0,
     broken_assets  INTEGER NOT NULL DEFAULT 0,
-    error          TEXT
+    error          TEXT,
+    trigger        TEXT    NOT NULL DEFAULT '',
+    scope          TEXT    NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS site_runs (
@@ -117,7 +119,9 @@ CREATE TABLE IF NOT EXISTS pagespeed_runs (
     status       TEXT    NOT NULL DEFAULT 'running',
     urls_tested  INTEGER NOT NULL DEFAULT 0,
     failures     INTEGER NOT NULL DEFAULT 0,
-    error        TEXT
+    error        TEXT,
+    trigger      TEXT    NOT NULL DEFAULT '',
+    expected     INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS pagespeed_results (
@@ -165,7 +169,26 @@ class Database:
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA foreign_keys=ON")
         self._conn.executescript(SCHEMA)
+        self._migrate()
         self._conn.commit()
+
+    # Columns added after the first release. CREATE TABLE IF NOT EXISTS does
+    # nothing to a table that already exists, so new columns need adding by
+    # hand for anyone already running this.
+    MIGRATIONS = (
+        ("runs", "trigger", "trigger TEXT NOT NULL DEFAULT ''"),
+        ("runs", "scope", "scope TEXT NOT NULL DEFAULT ''"),
+        ("pagespeed_runs", "trigger", "trigger TEXT NOT NULL DEFAULT ''"),
+        ("pagespeed_runs", "expected", "expected INTEGER NOT NULL DEFAULT 0"),
+    )
+
+    def _migrate(self) -> None:
+        for table, column, ddl in self.MIGRATIONS:
+            existing = {
+                row[1] for row in self._conn.execute(f"PRAGMA table_info({table})")
+            }
+            if column not in existing:
+                self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {ddl}")
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -185,11 +208,15 @@ class Database:
 
     # -- writes ------------------------------------------------------------
 
-    def start_run(self) -> int:
+    def start_run(self, *, trigger: str = "", scope: str = "") -> int:
+        """`trigger` is what started it; `scope` names the sites it covered."""
         with self._tx() as conn:
             cursor = conn.execute(
-                "INSERT INTO runs (started_at, status) VALUES (?, 'running')",
-                (utcnow(),),
+                """
+                INSERT INTO runs (started_at, status, trigger, scope)
+                VALUES (?, 'running', ?, ?)
+                """,
+                (utcnow(), trigger, scope),
             )
         return int(cursor.lastrowid)
 
@@ -445,6 +472,7 @@ class Database:
         "max_pages_per_site",
         "user_agent",
         "pagespeed_strategies",
+        "pagespeed_concurrency",
     )
 
     def get_settings(self) -> dict[str, str]:
@@ -565,11 +593,14 @@ class Database:
 
     # -- pagespeed ---------------------------------------------------------
 
-    def start_pagespeed_run(self) -> int:
+    def start_pagespeed_run(self, *, trigger: str = "", expected: int = 0) -> int:
         with self._tx() as conn:
             cursor = conn.execute(
-                "INSERT INTO pagespeed_runs (started_at, status) VALUES (?, 'running')",
-                (utcnow(),),
+                """
+                INSERT INTO pagespeed_runs (started_at, status, trigger, expected)
+                VALUES (?, 'running', ?, ?)
+                """,
+                (utcnow(), trigger, expected),
             )
         return int(cursor.lastrowid)
 

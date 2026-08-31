@@ -144,7 +144,8 @@ async def run_pagespeed(
     sites: list[Site],
     *,
     strategies: "tuple[str, ...] | None" = None,
-    concurrency: int = 2,
+    concurrency: int | None = None,
+    trigger: str = "",
     on_result=None,
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> tuple[int, int, int]:
@@ -162,7 +163,12 @@ async def run_pagespeed(
         for strategy in picked
     ]
 
-    run_id = database.start_pagespeed_run()
+    # Google allows 240 queries a minute with an API key and very few without,
+    # so the safe parallelism depends entirely on whether one is configured.
+    if concurrency is None:
+        concurrency = settings.pagespeed_concurrency
+
+    run_id = database.start_pagespeed_run(trigger=trigger, expected=len(jobs))
     tested = 0
     failures = 0
 

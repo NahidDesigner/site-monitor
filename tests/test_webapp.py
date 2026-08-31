@@ -515,3 +515,61 @@ def test_progress_reports_which_sites_are_done(signed_in):
 
     assert "done_domains" in status
     assert "broken_domains" in status
+
+
+# -- the schedule picker ------------------------------------------------------
+
+
+def test_a_preset_from_the_dropdown_is_saved(signed_in, database):
+    signed_in.post(
+        "/schedules/save",
+        data={"name": "Six hourly", "kind": "css_check", "cron": "0 */6 * * *", "enabled": "1"},
+    )
+
+    assert database.list_schedules()[0]["cron"] == "0 */6 * * *"
+
+
+def test_a_custom_expression_beats_the_dropdown(signed_in, database):
+    """Choosing "Custom schedule…" posts a sentinel plus the typed value."""
+    signed_in.post(
+        "/schedules/save",
+        data={
+            "name": "Odd one",
+            "kind": "css_check",
+            "cron": "custom",
+            "cron_custom": "15 2 * * 3",
+            "enabled": "1",
+        },
+    )
+
+    assert database.list_schedules()[0]["cron"] == "15 2 * * 3"
+
+
+def test_choosing_custom_without_typing_one_is_refused(signed_in, database):
+    response = signed_in.post(
+        "/schedules/save",
+        data={"name": "x", "kind": "css_check", "cron": "custom", "cron_custom": ""},
+        follow_redirects=False,
+    )
+
+    assert "error=" in response.headers["location"]
+    assert database.list_schedules() == []
+
+
+def test_a_bad_custom_expression_is_still_validated(signed_in, database):
+    response = signed_in.post(
+        "/schedules/save",
+        data={"name": "x", "kind": "css_check", "cron": "custom", "cron_custom": "99 * * * *"},
+        follow_redirects=False,
+    )
+
+    assert "out+of+range" in response.headers["location"].replace("%20", "+")
+    assert database.list_schedules() == []
+
+
+def test_the_form_offers_plain_language_options(signed_in):
+    body = signed_in.get("/schedules").text
+
+    assert "Every 6 hours" in body
+    assert "Every day at 3:00am" in body
+    assert "Custom schedule" in body
