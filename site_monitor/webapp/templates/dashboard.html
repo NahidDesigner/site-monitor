@@ -60,16 +60,23 @@
       <p class="hint" style="margin:2px 0 0">Each site's most recent check, not one run.</p>
     </div>
     <span class="spacer"></span>
-    <button class="btn-sm" type="button" data-copy="page">Copy page URLs</button>
-    <button class="btn-sm" type="button" data-copy="asset">Copy CSS URLs</button>
+    <button class="btn-sm" type="button" data-copy="page">Copy all page URLs</button>
+    <button class="btn-sm" type="button" data-copy="asset">Copy all CSS URLs</button>
     <a class="btn btn-sm" href="/export/broken.csv">Download CSV</a>
     <a class="btn btn-sm" href="/export/broken.xlsx">Download Excel</a>
   </div>
   {% for domain, rows in grouped.items() %}
-    <div class="finding">
-      <h3><a href="/sites/{{ domain }}">{{ domain }}</a>
-          <span class="pill bad">{{ rows|length }} broken</span>
-          <span class="dim">last checked {{ when(states[domain]['started_at']) }}</span></h3>
+    <div class="finding" data-copy-group>
+      <h3>
+        <a href="/sites/{{ domain }}">{{ domain }}</a>
+        <span class="pill bad">{{ rows|length }} broken</span>
+        <span class="dim">last checked {{ when(states[domain]['started_at']) }}</span>
+        <span class="spacer"></span>
+        <button class="btn-sm" type="button" data-copy="page"
+                title="Copy only this site's page URLs">Copy pages</button>
+        <button class="btn-sm" type="button" data-copy="asset"
+                title="Copy only this site's CSS URLs">Copy CSS</button>
+      </h3>
       {% set pages = {} %}
       {% for row in rows %}{% if pages.update({row['page_url']: pages.get(row['page_url'], []) + [row]}) %}{% endif %}{% endfor %}
       {% for page_url, items in pages.items() %}

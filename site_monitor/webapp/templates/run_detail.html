@@ -30,13 +30,21 @@
   <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px">
     <h2 style="margin:0">Broken stylesheets</h2>
     <span class="spacer"></span>
-    <button class="btn-sm" type="button" data-copy="page">Copy page URLs</button>
-    <button class="btn-sm" type="button" data-copy="asset">Copy CSS URLs</button>
+    <button class="btn-sm" type="button" data-copy="page">Copy all page URLs</button>
+    <button class="btn-sm" type="button" data-copy="asset">Copy all CSS URLs</button>
   </div>
+  {# data-copy-group scopes the buttons inside it to this site alone. #}
   {% for domain, rows in grouped.items() %}
-  <div class="finding">
-    <h3><a href="/sites/{{ domain }}">{{ domain }}</a>
-        <span class="pill bad">{{ rows|length }}</span></h3>
+  <div class="finding" data-copy-group>
+    <h3>
+      <a href="/sites/{{ domain }}">{{ domain }}</a>
+      <span class="pill bad">{{ rows|length }}</span>
+      <span class="spacer"></span>
+      <button class="btn-sm" type="button" data-copy="page"
+              title="Copy only this site's page URLs">Copy pages</button>
+      <button class="btn-sm" type="button" data-copy="asset"
+              title="Copy only this site's CSS URLs">Copy CSS</button>
+    </h3>
     {% for row in rows %}
       <p class="pg" data-page-url="{{ row['page_url'] }}"><a href="{{ row['page_url'] }}" target="_blank" rel="noopener">{{ row['page_url'] }}</a></p>
       <p class="as" data-asset-url="{{ row['asset_url'] }}">{{ row['asset_url'] }}<br><span class="why">{{ row['reason'] }}</span></p>

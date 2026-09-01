@@ -93,11 +93,20 @@ def test_a_shared_report_opens_without_an_account(client, database):
 
 
 def test_the_shared_report_shows_when_it_was_measured(client, database):
+    """The timestamp is the whole point, so it is read back from the row.
+
+    Hardcoding a date here made this test fail the moment the clock rolled
+    past midnight -- tested_at is set when the result is stored.
+    """
+    from datetime import datetime
+
     token = store(database)["mobile"]
+    row = database.pagespeed_result_by_token(token)
+    measured = datetime.fromisoformat(row["tested_at"])
 
     body = client.get(f"/share/speed/{token}").text
 
-    assert "August 2026" in body
+    assert measured.strftime("%d %B %Y") in body
     assert "record of that test, not a live measurement" in body
 
 

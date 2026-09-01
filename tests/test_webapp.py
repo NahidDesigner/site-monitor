@@ -1054,3 +1054,83 @@ def test_the_overview_does_not_list_every_unreachable_page_in_the_fleet(
     assert "https://stale.example/29/" not in body
     # The full list is still reachable, on the site's own page.
     assert "https://stale.example/29/" in signed_in.get("/sites/stale.example").text
+
+
+# -- copying one site's URLs, not the whole page ------------------------------
+
+
+def _two_broken_sites(database) -> int:
+    from site_monitor.crawler import SiteResult
+    from site_monitor.elementor import AssetResult, PageResult
+
+    def bad(page, asset):
+        return PageResult(
+            url=page, status_code=200, assets_checked=15,
+            broken=(AssetResult(url=asset, status_code=404,
+                                content_type="text/html", ok=False,
+                                reason="HTTP 404", elapsed_ms=9),),
+        )
+
+    database.upsert_site(domain="alpha.example", pages=["https://alpha.example/one/"])
+    database.upsert_site(domain="beta.example", pages=["https://beta.example/only/"])
+    run_id = database.start_run(trigger="manual", scope="2 sites")
+    database.record_site_result(run_id, SiteResult(
+        domain="alpha.example", pages_found=2, pages=[
+            bad("https://alpha.example/one/", "https://alpha.example/css/a1.css?ver=1"),
+            bad("https://alpha.example/two/", "https://alpha.example/css/a2.css?ver=2")]))
+    database.record_site_result(run_id, SiteResult(
+        domain="beta.example", pages_found=1, pages=[
+            bad("https://beta.example/only/", "https://beta.example/css/b1.css?ver=3")]))
+    database.finish_run(run_id, sites_checked=2, pages_checked=3,
+                        assets_checked=45, broken_assets=3, status="ok")
+    return run_id
+
+
+def test_each_site_on_a_report_gets_its_own_copy_buttons(signed_in, database):
+    run_id = _two_broken_sites(database)
+
+    body = signed_in.get(f"/runs/{run_id}").text
+
+    # One scoping container per site, and a pair of buttons inside each.
+    assert body.count("data-copy-group>") == 2
+    assert body.count('data-copy="page"') == 3   # two per-site, one page-wide
+    assert body.count('data-copy="asset"') == 3
+
+
+def test_the_page_wide_copy_buttons_stay_outside_every_group(signed_in, database):
+    """Scope comes from where a button sits, so position is the contract.
+
+    A page-wide button that drifted inside a .finding would silently start
+    copying one site instead of all of them.
+    """
+    run_id = _two_broken_sites(database)
+    body = signed_in.get(f"/runs/{run_id}").text
+
+    header = body[: body.index("data-copy-group>")]
+
+    assert 'data-copy="page"' in header
+    assert 'data-copy="asset"' in header
+    assert "Copy all page URLs" in header
+
+
+def test_the_overview_also_groups_copy_buttons_per_site(signed_in, database):
+    _two_broken_sites(database)
+
+    body = signed_in.get("/").text
+
+    assert body.count("data-copy-group>") == 2
+    assert "Copy all page URLs" in body
+
+
+def test_a_group_holds_only_its_own_sites_urls(signed_in, database):
+    """What the scoping actually has to guarantee, checked in the markup."""
+    run_id = _two_broken_sites(database)
+    body = signed_in.get(f"/runs/{run_id}").text
+
+    groups = body.split("data-copy-group>")[1:]
+    alpha, beta = groups[0], groups[1]
+
+    assert "alpha.example/css/a1.css" in alpha
+    assert "beta.example" not in alpha
+    assert "beta.example/css/b1.css" in beta
+    assert "alpha.example/css" not in beta

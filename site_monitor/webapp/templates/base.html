@@ -106,7 +106,8 @@ tr.daybreak td{background:var(--surface-2);font-size:10.5px;font-weight:700;
 /* findings */
 .finding{border:1px solid var(--rule);border-left:3px solid var(--bad);border-radius:6px;
   padding:13px 16px;margin-bottom:10px;background:var(--surface)}
-.finding h3{margin:0 0 8px;font-size:14px;font-weight:600}
+.finding h3{margin:0 0 8px;font-size:14px;font-weight:600;
+  display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .finding .pg{font-family:var(--mono);font-size:12px;color:var(--ink-soft);margin:0 0 6px;word-break:break-all}
 .finding .as{font-family:var(--mono);font-size:12px;margin:0 0 3px;padding-left:14px;
   border-left:2px solid var(--rule);word-break:break-all}
@@ -323,8 +324,12 @@ tr[data-site].is-broken{background:color-mix(in srgb,var(--bad) 7%,transparent)}
   document.querySelectorAll('[data-copy]').forEach(function(btn){
     btn.addEventListener('click', function(){
       var attr = btn.getAttribute('data-copy')==='page' ? 'data-page-url' : 'data-asset-url';
+      // A button inside a [data-copy-group] copies only that group -- one
+      // site's URLs. A button outside every group copies the whole page.
+      // Same handler either way; the button's position decides the scope.
+      var root = btn.closest('[data-copy-group]') || document;
       var seen = {}, urls = [];
-      document.querySelectorAll('['+attr+']').forEach(function(el){
+      root.querySelectorAll('['+attr+']').forEach(function(el){
         var url = el.getAttribute(attr);
         if(url && !seen[url]){ seen[url]=1; urls.push(url); }
       });
