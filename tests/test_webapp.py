@@ -1228,3 +1228,47 @@ def test_the_day_report_needs_a_login(client):
 
     assert response.status_code in (302, 303, 307)
     assert response.headers["location"] == "/login"
+
+
+# -- theme --------------------------------------------------------------------
+
+
+def test_the_dashboard_is_light_unless_dark_is_chosen(signed_in):
+    """A dark desktop should not silently impose a dark dashboard."""
+    body = signed_in.get("/").text
+
+    assert "@media (prefers-color-scheme" not in body
+    assert '[data-theme="dark"]' in body
+    assert 'id="theme-toggle"' in body
+
+
+def test_the_login_page_follows_the_same_stored_choice(client):
+    body = client.get("/login").text
+
+    assert "@media (prefers-color-scheme" not in body
+    assert "localStorage.getItem('theme')" in body
+
+
+def test_documents_are_light_whatever_the_reader_uses(signed_in, database):
+    """Reports get printed and sent on; they should not follow a machine."""
+    _day_of_checks(database)
+
+    body = signed_in.get("/reports/day").text
+
+    assert "@media (prefers-color-scheme" not in body
+    assert "data-theme" not in body
+
+
+def test_the_overview_counts_the_broken_stylesheets_it_lists(signed_in, database):
+    """The tile read "1 site broken · 0 broken stylesheets".
+
+    The template used a variable the route never passed, and Jinja renders an
+    undefined as empty rather than failing, so the count silently read zero
+    while the list below it showed the breakages.
+    """
+    _two_broken_sites(database)
+
+    body = signed_in.get("/").text
+
+    assert "3 broken stylesheets" in body
+    assert "0 broken stylesheets" not in body

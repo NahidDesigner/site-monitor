@@ -14,6 +14,7 @@ import yaml
 from fastapi import FastAPI, Form, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
+from jinja2 import StrictUndefined
 
 from ..config import ConfigError, Settings, apply_overrides, load_sites
 from ..cron import CronError, describe, next_run, parse as parse_cron
@@ -186,6 +187,12 @@ def _local_filter(tz_name: str):
 
 def create_app(base_settings: Settings) -> FastAPI:
     templates = Jinja2Templates(directory=str(TEMPLATES))
+    # A name a template uses but the route never passes renders as empty
+    # rather than failing, which is how the overview came to report "1 site
+    # broken - 0 broken stylesheets". Raise on it instead: a template
+    # referring to something that does not exist is a bug, and a silently
+    # wrong number in a monitoring tool is worse than a loud failure.
+    templates.env.undefined = StrictUndefined
     templates.env.filters["local"] = _local_filter(base_settings.timezone or "UTC")
     templates.env.filters["since"] = _since_filter
     templates.env.globals["tz_name"] = base_settings.timezone or "UTC"
@@ -444,6 +451,7 @@ def create_app(base_settings: Settings) -> FastAPI:
             total_pages=sum(len(s.pages) for s in enabled),
             latest=latest,
             grouped=grouped,
+            broken=broken,
             unverified=unverified,
             never_checked=never_checked,
             states=states,

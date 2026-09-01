@@ -8,9 +8,9 @@
 <style>
 :root{--paper:#F4F5F7;--surface:#FFF;--ink:#16202B;--ink-faint:#7C8894;
  --rule:#DDE1E6;--rule-strong:#C4CBD3;--copper:#A85434;--bad:#A3342F;--bad-wash:#F8E7E5}
-@media (prefers-color-scheme:dark){:root{--paper:#0F1720;--surface:#16202B;--ink:#E6EAEE;
+:root[data-theme="dark"]{--paper:#0F1720;--surface:#16202B;--ink:#E6EAEE;
  --ink-faint:#74818E;--rule:#263341;--rule-strong:#354557;--copper:#D98661;
- --bad:#E0796F;--bad-wash:#2B1817}}
+ --bad:#E0796F;--bad-wash:#2B1817}
 *{box-sizing:border-box}
 body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
  background:var(--paper);color:var(--ink);font-family:'Archivo',system-ui,sans-serif;padding:24px}
@@ -30,7 +30,16 @@ button:hover{filter:brightness(1.08)}
 :focus-visible{outline:2px solid var(--copper);outline-offset:2px}
 .err{background:var(--bad-wash);border:1px solid var(--bad);color:var(--bad);
  padding:10px 13px;border-radius:6px;font-size:13px;margin-bottom:18px}
-</style></head>
+</style>
+<script>
+  // Same stored choice the dashboard uses, so signing in does not flip the
+  // theme out from under you.
+  try{
+    if(localStorage.getItem('theme') === 'dark'){
+      document.documentElement.setAttribute('data-theme','dark');
+    }
+  }catch(e){}
+</script></head>
 <body>
 <form class="box" method="post" action="/login">
   <div class="brand"><span class="dot"></span>Site Monitor</div>
