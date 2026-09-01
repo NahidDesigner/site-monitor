@@ -17,7 +17,8 @@ from fastapi.templating import Jinja2Templates
 
 from ..config import ConfigError, Settings, apply_overrides, load_sites
 from ..cron import CronError, describe, next_run, parse as parse_cron
-from ..db import Database
+from ..daily import build_day_report, today_in
+from ..db import Database, utcnow
 from ..history import build_timeline
 from ..exports import (
     BROKEN_COLUMNS,
@@ -1065,6 +1066,44 @@ def create_app(base_settings: Settings) -> FastAPI:
             media_type=media_type,
             headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
+
+    @app.get("/reports/day", response_class=HTMLResponse)
+    async def day_report(request: Request, date: str = "", download: str = ""):
+        """Everything that happened to the sites on one calendar day.
+
+        A day rather than a rolling 24 hours: a rolling window returns
+        something different every time it is opened, so a downloaded copy
+        cannot be cited or compared against anyone else's.
+        """
+        from datetime import date as date_cls, timedelta
+
+        settings = current_settings()
+        tz_name = settings.timezone or "UTC"
+        try:
+            day = date_cls.fromisoformat(date) if date else today_in(tz_name)
+        except ValueError:
+            day = today_in(tz_name)
+
+        with db() as database:
+            report = build_day_report(database, day, tz_name)
+
+        response = render(
+            request,
+            "day_report.html",
+            active="runs",
+            report=report,
+            day=day,
+            prev_day=day - timedelta(days=1),
+            next_day=day + timedelta(days=1),
+            tz_name=tz_name,
+            today=today_in(tz_name),
+            printable=bool(download),
+            generated_at=utcnow(),
+        )
+        if download:
+            name = f"site-check-{day.isoformat()}.html"
+            response.headers["Content-Disposition"] = f'attachment; filename="{name}"'
+        return response
 
     @app.get("/export/{report}.{fmt}")
     async def export(

@@ -1,0 +1,227 @@
+{# One day of checks, as a document.
+
+   Standalone rather than extending base.html: this gets downloaded and
+   emailed, and a saved copy carrying a dashboard nav and a Sign out button
+   would be nonsense. Standalone also means what is previewed here is byte
+   for byte what the downloaded file contains.
+
+   Breakages are grouped site -> page -> stylesheet. A flat list of every
+   broken URL is unreadable and loses which client each one belongs to. #}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Site check report · {{ day.strftime('%d %B %Y') }}</title>
+<style>
+:root{
+  --paper:#FFFFFF; --surface:#F7F8FA; --ink:#16202B; --ink-soft:#4A5765;
+  --ink-faint:#7C8894; --rule:#DDE1E6; --rule-strong:#C4CBD3;
+  --ok:#3E7263; --ok-wash:#E6F0EC; --warn:#8A6410; --warn-wash:#F8EFDC;
+  --bad:#A3342F; --bad-wash:#F8E7E5; --accent:#A85434;
+  --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+  --sans:system-ui,-apple-system,'Segoe UI',sans-serif;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);
+  font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+.wrap{max-width:860px;margin:0 auto;padding:34px 22px 80px}
+h1{font-size:1.55rem;font-weight:700;letter-spacing:-.02em;margin:0 0 4px}
+h2{font-size:1rem;font-weight:600;margin:34px 0 12px;letter-spacing:-.005em}
+a{color:var(--accent)}
+.sub{color:var(--ink-soft);font-size:13.5px;margin:0}
+.bar{display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap;margin-bottom:24px}
+.spacer{margin-left:auto}
+.btn{display:inline-block;font-size:13px;font-weight:600;text-decoration:none;
+  padding:8px 14px;border-radius:6px;border:1px solid var(--rule-strong);
+  color:var(--ink);background:var(--surface)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
+  gap:12px;margin-bottom:8px}
+.tile{background:var(--surface);border:1px solid var(--rule);border-radius:8px;
+  padding:13px 15px}
+.tile .k{font-size:10px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--ink-faint);margin-bottom:5px}
+.tile .v{font-size:1.7rem;font-weight:700;letter-spacing:-.03em;line-height:1.1;
+  font-variant-numeric:tabular-nums}
+.tile.bad .v{color:var(--bad)} .tile.ok .v{color:var(--ok)}
+
+/* one check in the day */
+.check{border:1px solid var(--rule);border-radius:8px;margin-bottom:14px;
+  overflow:hidden}
+.check-head{background:var(--surface);padding:11px 16px;display:flex;gap:12px;
+  align-items:baseline;flex-wrap:wrap;border-bottom:1px solid var(--rule)}
+.at{font-family:var(--mono);font-size:14px;font-weight:600}
+.trig{font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+  padding:2px 7px;border-radius:4px;background:var(--rule);color:var(--ink-soft)}
+.trig.sched{background:#EFE3DC;color:var(--accent)}
+.headline{font-size:13px;color:var(--ink-soft)}
+.check-body{padding:6px 16px 14px}
+
+.site{padding:12px 0;border-bottom:1px solid var(--rule)}
+.site:last-child{border-bottom:none}
+.site-name{font-weight:600;font-size:14px;margin-bottom:7px}
+.counts{font-size:11px;font-weight:700;letter-spacing:.04em;padding:2px 7px;
+  border-radius:4px;margin-left:6px;white-space:nowrap}
+.counts.found{background:var(--bad-wash);color:var(--bad)}
+.counts.fixed{background:var(--ok-wash);color:var(--ok)}
+.counts.still{background:var(--surface);color:var(--ink-soft);
+  border:1px solid var(--rule-strong)}
+
+.grp{margin:0 0 9px;padding-left:13px;border-left:2px solid var(--rule)}
+.grp.found{border-left-color:var(--bad)}
+.grp.fixed{border-left-color:var(--ok)}
+.grp-label{font-size:10.5px;font-weight:700;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--ink-faint);margin-bottom:4px}
+.pg{font-family:var(--mono);font-size:12px;word-break:break-all;margin:5px 0 2px}
+.as{font-family:var(--mono);font-size:11.5px;color:var(--ink-soft);margin:0 0 0 14px}
+/* Only the URL may break mid-token. The reason is prose and gets its own
+   line, so it never ends up hyphenated across a wrap like "content-t / ype". */
+.as .url{word-break:break-all}
+.as .why{display:block;font-family:var(--sans);font-size:11.5px;
+  color:var(--ink-faint);margin-left:12px}
+.note{font-size:12.5px;color:var(--warn);margin:4px 0 0}
+.quiet{color:var(--ink-faint);font-size:13px;margin:8px 0 0}
+.foot{margin-top:38px;padding-top:14px;border-top:1px solid var(--rule);
+  font-size:12px;color:var(--ink-faint)}
+@media print{
+  .bar .btn, .nav-back{display:none}
+  .check{break-inside:avoid}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="bar">
+  <div>
+    <h1>Site check report</h1>
+    <p class="sub">{{ day.strftime('%A, %d %B %Y') }} · all times {{ tz_name }}</p>
+  </div>
+  {% if not printable %}
+  <span class="spacer"></span>
+  <a class="btn" href="/reports/day?date={{ prev_day.isoformat() }}">◀ Previous day</a>
+  {% if day < today %}
+  <a class="btn" href="/reports/day?date={{ next_day.isoformat() }}">Next day ▶</a>
+  {% endif %}
+  <a class="btn primary" href="/reports/day?date={{ day.isoformat() }}&download=1">Download</a>
+  <a class="btn nav-back" href="/runs">All reports</a>
+  {% endif %}
+</div>
+
+{% if report.is_empty %}
+  <p class="quiet">No checks ran on this day.</p>
+{% else %}
+
+<div class="tiles">
+  <div class="tile">
+    <div class="k">Checks run</div><div class="v">{{ report.check_count }}</div>
+  </div>
+  <div class="tile">
+    <div class="k">Sites checked</div><div class="v">{{ report.sites_touched }}</div>
+  </div>
+  <div class="tile {{ 'bad' if report.found_count else '' }}">
+    <div class="k">Newly broken</div><div class="v">{{ report.found_count }}</div>
+  </div>
+  <div class="tile {{ 'ok' if report.fixed_count else '' }}">
+    <div class="k">Fixed</div><div class="v">{{ report.fixed_count }}</div>
+  </div>
+</div>
+
+{# ---- a reusable block: one site's URLs, grouped by page ---------------- #}
+{% macro urls(rows, kind, label) %}
+  {% if rows %}
+  <div class="grp {{ kind }}">
+    <div class="grp-label">{{ label }} ({{ rows|length }})</div>
+    {% set pages = {} %}
+    {% for row in rows %}
+      {% if pages.update({row['page_url']: pages.get(row['page_url'], []) + [row]}) %}{% endif %}
+    {% endfor %}
+    {% for page_url, items in pages.items() %}
+      <p class="pg">{{ page_url }}</p>
+      {% for item in items %}
+        <p class="as">↳ <span class="url">{{ item['asset_url'] }}</span>{% if item['reason'] %}
+           <span class="why">{{ item['reason'] }}</span>{% endif %}</p>
+      {% endfor %}
+    {% endfor %}
+  </div>
+  {% endif %}
+{% endmacro %}
+
+<h2>What happened, in order</h2>
+
+{% for check in report.checks %}
+<div class="check">
+  <div class="check-head">
+    <span class="at">{{ check.run['started_at']|local('%H:%M') }}</span>
+    {% set trigger = check.run['trigger'] or '' %}
+    {% if trigger.startswith('schedule:') %}
+      <span class="trig sched">Scheduled</span>
+    {% elif trigger.startswith('site:') %}
+      <span class="trig">Spot check · {{ trigger[5:] }}</span>
+    {% else %}
+      <span class="trig">Manual</span>
+    {% endif %}
+    <span class="headline">{{ check.headline }}</span>
+    <span class="spacer"></span>
+    <span class="headline">{{ '{:,}'.format(check.run['pages_checked']) }} pages</span>
+  </div>
+
+  <div class="check-body">
+    {% if check.noteworthy %}
+      {% for site in check.noteworthy %}
+      <div class="site">
+        <div class="site-name">{{ site.domain }}
+          {% if site.found %}<span class="counts found">{{ site.found|length }} found</span>{% endif %}
+          {% if site.fixed %}<span class="counts fixed">{{ site.fixed|length }} fixed</span>{% endif %}
+          {% if site.still %}<span class="counts still">{{ site.still|length }} still broken</span>{% endif %}
+        </div>
+        {% if site.error %}<p class="note">Check failed: {{ site.error }}</p>{% endif %}
+        {% if site.warning %}<p class="note">{{ site.warning }}</p>{% endif %}
+        {{ urls(site.found, 'found', 'Newly broken') }}
+        {{ urls(site.fixed, 'fixed', 'Fixed since the previous check') }}
+        {{ urls(site.still, 'still', 'Still broken') }}
+      </div>
+      {% endfor %}
+    {% else %}
+      <p class="quiet">Every stylesheet resolved correctly across
+         {{ check.run['sites_checked'] }} site{{ '' if check.run['sites_checked'] == 1 else 's' }}.</p>
+    {% endif %}
+  </div>
+</div>
+{% endfor %}
+
+{# ---- where it stands at the end of the day ----------------------------- #}
+<h2>Still outstanding at the end of the day</h2>
+{% if report.outstanding %}
+  <p class="sub" style="margin-bottom:12px">Each site as of its last check
+     {{ day.strftime('%d %B') }}. This is the list to act on.</p>
+  {% for site in report.outstanding %}
+  <div class="site">
+    <div class="site-name">{{ site.domain }}
+      {% set total = (site.found|length) + (site.still|length) %}
+      {% if total %}<span class="counts found">{{ total }} broken</span>{% endif %}
+    </div>
+    {% if site.error %}<p class="note">Check failed: {{ site.error }}</p>{% endif %}
+    {% if site.warning %}<p class="note">{{ site.warning }}</p>{% endif %}
+    {{ urls(site.found, 'found', 'Newly broken') }}
+    {{ urls(site.still, 'still', 'Still broken') }}
+  </div>
+  {% endfor %}
+{% else %}
+  <p class="quiet">Nothing outstanding — every site was clean at its last check.</p>
+{% endif %}
+
+{% endif %}
+
+<p class="foot">
+  Generated {{ generated_at }} · times shown in {{ tz_name }}.
+  A stylesheet counts as broken when it does not return HTTP 200 with a
+  <code>text/css</code> content type — the browser then renders the page with
+  no styling and reports no error.
+</p>
+
+</div>
+</body>
+</html>

@@ -1058,3 +1058,40 @@ class Database:
                 (keep_per_url,),
             )
             return cursor.rowcount
+
+    # -- a day's worth of checks ------------------------------------------
+
+    def runs_between(self, start: str, end: str) -> list[sqlite3.Row]:
+        """Runs started within a half-open UTC window, oldest first.
+
+        Oldest first because a day reads forward: what was found at 01:00,
+        then what had changed by 05:00.
+        """
+        return list(
+            self._conn.execute(
+                """
+                SELECT * FROM runs
+                 WHERE started_at >= ? AND started_at < ?
+                 ORDER BY started_at, id
+                """,
+                (start, end),
+            )
+        )
+
+    def previous_site_run(self, domain: str, before_id: int) -> sqlite3.Row | None:
+        """The check of this site immediately before the given one.
+
+        Deliberately not restricted to the same day: "found" means new since
+        the site was last looked at, and at 01:00 that is yesterday's check.
+        Resetting the comparison at midnight would report every outstanding
+        breakage as freshly found each morning.
+        """
+        return self._conn.execute(
+            """
+            SELECT * FROM site_runs
+             WHERE domain = ? AND id < ?
+             ORDER BY id DESC
+             LIMIT 1
+            """,
+            (domain, before_id),
+        ).fetchone()

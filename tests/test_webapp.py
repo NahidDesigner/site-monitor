@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -1134,3 +1136,95 @@ def test_a_group_holds_only_its_own_sites_urls(signed_in, database):
     assert "beta.example" not in alpha
     assert "beta.example/css/b1.css" in beta
     assert "alpha.example/css" not in beta
+
+
+# -- the day report -----------------------------------------------------------
+
+
+def _day_of_checks(database):
+    """A morning breakage, partly fixed by the afternoon."""
+    from site_monitor.crawler import SiteResult
+    from site_monitor.elementor import AssetResult, PageResult
+
+    def bad(page, asset):
+        return PageResult(
+            url=page, status_code=200, assets_checked=15,
+            broken=(AssetResult(url=asset, status_code=404,
+                                content_type="text/html", ok=False,
+                                reason="HTTP 404", elapsed_ms=9),),
+        )
+
+    database.upsert_site(domain="alpha.example", pages=["https://alpha.example/one/"])
+    now = datetime.now(timezone.utc)
+
+    for hour_offset, broken in ((2, [("one", "a1"), ("two", "a2")]), (1, [("one", "a1")])):
+        at = (now - timedelta(hours=hour_offset)).isoformat(timespec="seconds")
+        pages = [bad(f"https://alpha.example/{p}/",
+                     f"https://alpha.example/css/{a}.css?ver=1") for p, a in broken]
+        run_id = database.start_run(trigger="schedule:nightly", scope="alpha.example")
+        database._conn.execute(
+            "UPDATE runs SET started_at = ? WHERE id = ?", (at, run_id)
+        )
+        database._conn.commit()
+        database.record_site_result(run_id, SiteResult(
+            domain="alpha.example", pages_found=len(pages), pages=pages))
+        database.finish_run(run_id, sites_checked=1, pages_checked=len(pages),
+                            assets_checked=30, broken_assets=len(broken), status="ok")
+
+
+def test_the_day_report_shows_each_check_with_its_time(signed_in, database):
+    _day_of_checks(database)
+
+    body = signed_in.get("/reports/day").text
+
+    assert "Site check report" in body
+    assert "What happened, in order" in body
+    assert "2 found" in body
+    assert "1 fixed" in body
+
+
+def test_the_day_report_groups_urls_under_their_site(signed_in, database):
+    """Not one flat list -- site, then page, then the stylesheet under it."""
+    _day_of_checks(database)
+
+    body = signed_in.get("/reports/day").text
+
+    assert "alpha.example" in body
+    assert "https://alpha.example/two/" in body
+    assert "https://alpha.example/css/a2.css?ver=1" in body
+    # The page URL comes before the stylesheet nested beneath it.
+    assert body.index("https://alpha.example/two/") < body.index("css/a2.css")
+
+
+def test_the_day_report_downloads_as_a_file(signed_in, database):
+    _day_of_checks(database)
+
+    response = signed_in.get("/reports/day?download=1")
+
+    assert response.status_code == 200
+    assert "attachment" in response.headers["content-disposition"]
+    assert "site-check-" in response.headers["content-disposition"]
+    # A saved copy must not carry dashboard chrome.
+    assert "Sign out" not in response.text
+    assert "Download</a>" not in response.text
+
+
+def test_a_day_with_no_checks_says_so(signed_in, database):
+    body = signed_in.get("/reports/day?date=2020-01-01").text
+
+    assert "No checks ran on this day" in body
+
+
+def test_a_malformed_date_falls_back_to_today(signed_in, database):
+    _day_of_checks(database)
+
+    body = signed_in.get("/reports/day?date=not-a-date").text
+
+    assert "What happened, in order" in body
+
+
+def test_the_day_report_needs_a_login(client):
+    response = client.get("/reports/day", follow_redirects=False)
+
+    assert response.status_code in (302, 303, 307)
+    assert response.headers["location"] == "/login"
