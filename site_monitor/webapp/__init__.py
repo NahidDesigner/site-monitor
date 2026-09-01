@@ -1076,7 +1076,9 @@ def create_app(base_settings: Settings) -> FastAPI:
         )
 
     @app.get("/reports/day", response_class=HTMLResponse)
-    async def day_report(request: Request, date: str = "", download: str = ""):
+    async def day_report(
+        request: Request, date: str = "", download: str = "", detail: str = "urls"
+    ):
         """Everything that happened to the sites on one calendar day.
 
         A day rather than a rolling 24 hours: a rolling window returns
@@ -1092,6 +1094,11 @@ def create_app(base_settings: Settings) -> FastAPI:
         except ValueError:
             day = today_in(tz_name)
 
+        # summary: sites and counts only. urls: the broken page URLs too.
+        # full: the stylesheet behind each, for whoever fixes the server.
+        if detail not in ("summary", "urls", "full"):
+            detail = "urls"
+
         with db() as database:
             report = build_day_report(database, day, tz_name)
 
@@ -1106,10 +1113,12 @@ def create_app(base_settings: Settings) -> FastAPI:
             tz_name=tz_name,
             today=today_in(tz_name),
             printable=bool(download),
+            detail=detail,
             generated_at=utcnow(),
         )
         if download:
-            name = f"site-check-{day.isoformat()}.html"
+            suffix = {"summary": "-summary", "urls": "", "full": "-full"}[detail]
+            name = f"site-check-{day.isoformat()}{suffix}.html"
             response.headers["Content-Disposition"] = f'attachment; filename="{name}"'
         return response
 

@@ -85,8 +85,17 @@ a{color:var(--accent)}
 .quiet{color:var(--ink-faint);font-size:13px;margin:8px 0 0}
 .foot{margin-top:38px;padding-top:14px;border-top:1px solid var(--rule);
   font-size:12px;color:var(--ink-faint)}
+.levels{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:22px}
+.lvl{display:block;text-decoration:none;color:var(--ink-soft);padding:7px 12px;
+  border:1px solid var(--rule-strong);border-radius:6px;background:var(--surface);
+  line-height:1.25}
+.lvl strong{display:block;font-size:12.5px;color:var(--ink)}
+.lvl span{font-size:11px;color:var(--ink-faint)}
+.lvl.on{border-color:var(--accent);background:#fff;box-shadow:inset 0 0 0 1px var(--accent)}
+.lvl.on strong{color:var(--accent)}
+
 @media print{
-  .bar .btn, .nav-back{display:none}
+  .bar .btn, .nav-back, .levels{display:none}
   .check{break-inside:avoid}
 }
 </style>
@@ -101,14 +110,33 @@ a{color:var(--accent)}
   </div>
   {% if not printable %}
   <span class="spacer"></span>
-  <a class="btn" href="/reports/day?date={{ prev_day.isoformat() }}">◀ Previous day</a>
+  <a class="btn" href="/reports/day?date={{ prev_day.isoformat() }}&detail={{ detail }}">◀ Previous</a>
   {% if day < today %}
-  <a class="btn" href="/reports/day?date={{ next_day.isoformat() }}">Next day ▶</a>
+  <a class="btn" href="/reports/day?date={{ next_day.isoformat() }}&detail={{ detail }}">Next ▶</a>
   {% endif %}
-  <a class="btn primary" href="/reports/day?date={{ day.isoformat() }}&download=1">Download</a>
   <a class="btn nav-back" href="/runs">All reports</a>
   {% endif %}
 </div>
+
+{% if not printable %}
+{# How much detail to include. Each level is a superset of the one before,
+   so the same document can be short enough to skim or complete enough to
+   hand to whoever fixes the server. #}
+<div class="levels">
+  {% for key, label, hint in [
+      ('summary', 'Summary',   'sites and counts only'),
+      ('urls',    'With URLs', 'broken page URLs under each site'),
+      ('full',    'Full',      'plus the stylesheet behind each page')] %}
+    <a class="lvl {{ 'on' if detail == key }}"
+       href="/reports/day?date={{ day.isoformat() }}&detail={{ key }}">
+      <strong>{{ label }}</strong><span>{{ hint }}</span>
+    </a>
+  {% endfor %}
+  <span class="spacer"></span>
+  <a class="btn primary" href="/reports/day?date={{ day.isoformat() }}&detail={{ detail }}&download=1">
+    Download this version</a>
+</div>
+{% endif %}
 
 {% if report.is_empty %}
   <p class="quiet">No checks ran on this day.</p>
@@ -122,29 +150,34 @@ a{color:var(--accent)}
     <div class="k">Sites checked</div><div class="v">{{ report.sites_touched }}</div>
   </div>
   <div class="tile {{ 'bad' if report.found_count else '' }}">
-    <div class="k">Newly broken</div><div class="v">{{ report.found_count }}</div>
+    <div class="k">Pages broken</div><div class="v">{{ report.found_pages_count }}</div>
   </div>
   <div class="tile {{ 'ok' if report.fixed_count else '' }}">
-    <div class="k">Fixed</div><div class="v">{{ report.fixed_count }}</div>
+    <div class="k">Pages fixed</div><div class="v">{{ report.fixed_pages_count }}</div>
   </div>
 </div>
 
-{# ---- a reusable block: one site's URLs, grouped by page ---------------- #}
+{# ---- one group of breakages, rendered to the chosen depth ------------- #}
 {% macro urls(rows, kind, label) %}
   {% if rows %}
-  <div class="grp {{ kind }}">
-    <div class="grp-label">{{ label }} ({{ rows|length }})</div>
-    {% set pages = {} %}
+    {% set pages = [] %}
     {% for row in rows %}
-      {% if pages.update({row['page_url']: pages.get(row['page_url'], []) + [row]}) %}{% endif %}
+      {% if row['page_url'] not in pages %}{% set _ = pages.append(row['page_url']) %}{% endif %}
     {% endfor %}
-    {% for page_url, items in pages.items() %}
-      <p class="pg">{{ page_url }}</p>
-      {% for item in items %}
-        <p class="as">↳ <span class="url">{{ item['asset_url'] }}</span>{% if item['reason'] %}
-           <span class="why">{{ item['reason'] }}</span>{% endif %}</p>
+  <div class="grp {{ kind }}">
+    <div class="grp-label">{{ label }} ({{ pages|length }}
+      page{{ '' if pages|length == 1 else 's' }})</div>
+    {% if detail != 'summary' %}
+      {% for page_url in pages %}
+        <p class="pg">{{ page_url }}</p>
+        {% if detail == 'full' %}
+          {% for row in rows if row['page_url'] == page_url %}
+            <p class="as">↳ <span class="url">{{ row['asset_url'] }}</span>{% if row['reason'] %}
+               <span class="why">{{ row['reason'] }}</span>{% endif %}</p>
+          {% endfor %}
+        {% endif %}
       {% endfor %}
-    {% endfor %}
+    {% endif %}
   </div>
   {% endif %}
 {% endmacro %}
@@ -165,7 +198,8 @@ a{color:var(--accent)}
     {% endif %}
     <span class="headline">{{ check.headline }}</span>
     <span class="spacer"></span>
-    <span class="headline">{{ '{:,}'.format(check.run['pages_checked']) }} pages</span>
+    <span class="headline">{{ '{:,}'.format(check.run['pages_checked']) }}
+      page{{ '' if check.run['pages_checked'] == 1 else 's' }} checked</span>
   </div>
 
   <div class="check-body">
@@ -173,15 +207,17 @@ a{color:var(--accent)}
       {% for site in check.noteworthy %}
       <div class="site">
         <div class="site-name">{{ site.domain }}
-          {% if site.found %}<span class="counts found">{{ site.found|length }} found</span>{% endif %}
-          {% if site.fixed %}<span class="counts fixed">{{ site.fixed|length }} fixed</span>{% endif %}
-          {% if site.still %}<span class="counts still">{{ site.still|length }} still broken</span>{% endif %}
+          {% if site.found %}<span class="counts found">{{ site.found_pages|length }} found</span>{% endif %}
+          {% if site.fixed %}<span class="counts fixed">{{ site.fixed_pages|length }} fixed</span>{% endif %}
+          {% if site.still %}<span class="counts still">{{ site.still_pages|length }} still broken</span>{% endif %}
         </div>
         {% if site.error %}<p class="note">Check failed: {{ site.error }}</p>{% endif %}
         {% if site.warning %}<p class="note">{{ site.warning }}</p>{% endif %}
-        {{ urls(site.found, 'found', 'Newly broken') }}
-        {{ urls(site.fixed, 'fixed', 'Fixed since the previous check') }}
-        {{ urls(site.still, 'still', 'Still broken') }}
+        {% if detail != 'summary' %}
+          {{ urls(site.found, 'found', 'Newly broken') }}
+          {{ urls(site.fixed, 'fixed', 'Fixed since the previous check') }}
+          {{ urls(site.still, 'still', 'Still broken') }}
+        {% endif %}
       </div>
       {% endfor %}
     {% else %}
@@ -200,13 +236,16 @@ a{color:var(--accent)}
   {% for site in report.outstanding %}
   <div class="site">
     <div class="site-name">{{ site.domain }}
-      {% set total = (site.found|length) + (site.still|length) %}
-      {% if total %}<span class="counts found">{{ total }} broken</span>{% endif %}
+      {% set total = site.broken_pages|length %}
+      {% if total %}<span class="counts found">{{ total }} broken
+        page{{ '' if total == 1 else 's' }}</span>{% endif %}
     </div>
     {% if site.error %}<p class="note">Check failed: {{ site.error }}</p>{% endif %}
     {% if site.warning %}<p class="note">{{ site.warning }}</p>{% endif %}
-    {{ urls(site.found, 'found', 'Newly broken') }}
-    {{ urls(site.still, 'still', 'Still broken') }}
+    {% if detail != 'summary' %}
+      {{ urls(site.found, 'found', 'Newly broken') }}
+      {{ urls(site.still, 'still', 'Still broken') }}
+    {% endif %}
   </div>
   {% endfor %}
 {% else %}

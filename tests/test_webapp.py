@@ -1184,16 +1184,98 @@ def test_the_day_report_shows_each_check_with_its_time(signed_in, database):
 
 
 def test_the_day_report_groups_urls_under_their_site(signed_in, database):
-    """Not one flat list -- site, then page, then the stylesheet under it."""
+    """Not one flat list -- pages grouped under the site they belong to."""
     _day_of_checks(database)
 
     body = signed_in.get("/reports/day").text
 
     assert "alpha.example" in body
     assert "https://alpha.example/two/" in body
+
+
+# -- how much detail the report carries ---------------------------------------
+
+
+def test_the_summary_level_carries_no_urls_at_all(signed_in, database):
+    """The shortest form: when it happened, which sites, how many pages."""
+    _day_of_checks(database)
+
+    body = signed_in.get("/reports/day?detail=summary").text
+
+    assert "alpha.example" in body
+    assert "2 found" in body
+    assert "https://alpha.example/two/" not in body
+    assert "css/a2.css" not in body
+
+
+def test_the_default_level_lists_pages_but_not_stylesheets(signed_in, database):
+    """Stylesheet URLs are noise in a report meant to be read by a person."""
+    _day_of_checks(database)
+
+    body = signed_in.get("/reports/day").text
+
+    assert "https://alpha.example/two/" in body
+    assert "css/a2.css" not in body
+
+
+def test_the_full_level_adds_the_stylesheet_behind_each_page(signed_in, database):
+    """Kept for whoever has to fix the server, not for the summary reader."""
+    _day_of_checks(database)
+
+    body = signed_in.get("/reports/day?detail=full").text
+
+    assert "https://alpha.example/two/" in body
     assert "https://alpha.example/css/a2.css?ver=1" in body
-    # The page URL comes before the stylesheet nested beneath it.
     assert body.index("https://alpha.example/two/") < body.index("css/a2.css")
+
+
+def test_counts_are_pages_not_stylesheets(signed_in, database):
+    """One page can reference several broken stylesheets.
+
+    "How many pages are broken" is the number people ask for; counting rows
+    would overstate it.
+    """
+    from site_monitor.crawler import SiteResult
+    from site_monitor.elementor import AssetResult, PageResult
+
+    database.upsert_site(domain="multi.example", pages=["https://multi.example/x/"])
+    run_id = database.start_run(trigger="manual", scope="multi.example")
+    database.record_site_result(run_id, SiteResult(
+        domain="multi.example", pages_found=1,
+        pages=[PageResult(
+            url="https://multi.example/x/", status_code=200, assets_checked=15,
+            broken=tuple(
+                AssetResult(url=f"https://multi.example/css/{n}.css", status_code=404,
+                            content_type="text/html", ok=False, reason="HTTP 404",
+                            elapsed_ms=9)
+                for n in range(3)
+            ),
+        )]))
+    database.finish_run(run_id, sites_checked=1, pages_checked=1,
+                        assets_checked=15, broken_assets=3, status="ok")
+
+    body = signed_in.get("/reports/day?detail=summary").text
+
+    # Three stylesheets, but only one page.
+    assert "1 found" in body
+    assert "3 found" not in body
+
+
+def test_an_unknown_detail_level_falls_back_rather_than_failing(signed_in, database):
+    _day_of_checks(database)
+
+    body = signed_in.get("/reports/day?detail=nonsense").text
+
+    assert "https://alpha.example/two/" in body
+
+
+def test_the_download_name_says_which_version_it_is(signed_in, database):
+    _day_of_checks(database)
+
+    for level, marker in (("summary", "-summary.html"), ("urls", ".html"),
+                          ("full", "-full.html")):
+        response = signed_in.get(f"/reports/day?detail={level}&download=1")
+        assert marker in response.headers["content-disposition"], level
 
 
 def test_the_day_report_downloads_as_a_file(signed_in, database):

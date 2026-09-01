@@ -64,6 +64,37 @@ class SiteEntry:
     def still(self) -> tuple:
         return self.delta.still
 
+    @staticmethod
+    def _pages(rows) -> list[str]:
+        """Distinct page URLs, in the order first seen.
+
+        A page can reference several broken stylesheets, so counting rows
+        overstates how many pages are actually affected -- and "how many
+        pages are broken" is the number anyone asks for first.
+        """
+        seen: list[str] = []
+        for row in rows:
+            if row["page_url"] not in seen:
+                seen.append(row["page_url"])
+        return seen
+
+    @property
+    def found_pages(self) -> list[str]:
+        return self._pages(self.delta.new)
+
+    @property
+    def fixed_pages(self) -> list[str]:
+        return self._pages(self.delta.fixed)
+
+    @property
+    def still_pages(self) -> list[str]:
+        return self._pages(self.delta.still)
+
+    @property
+    def broken_pages(self) -> list[str]:
+        """Every page of this site broken at this check: new plus carried over."""
+        return self._pages(tuple(self.delta.new) + tuple(self.delta.still))
+
     @property
     def is_noteworthy(self) -> bool:
         """Whether this site earned a place in the report.
@@ -103,15 +134,33 @@ class CheckEntry:
     def noteworthy(self) -> list[SiteEntry]:
         return [site for site in self.sites if site.is_noteworthy]
 
+    # Counts shown to a reader are pages, not stylesheet rows. One page can
+    # reference several broken stylesheets, so rows overstate the damage --
+    # and "how many pages are broken" is the question people actually ask.
+    def _pages(self, attribute: str) -> int:
+        return len({page for site in self.sites for page in getattr(site, attribute)})
+
+    @property
+    def found_pages_count(self) -> int:
+        return self._pages("found_pages")
+
+    @property
+    def fixed_pages_count(self) -> int:
+        return self._pages("fixed_pages")
+
+    @property
+    def still_pages_count(self) -> int:
+        return self._pages("still_pages")
+
     @property
     def headline(self) -> str:
         parts = []
-        if self.found_count:
-            parts.append(f"{self.found_count} found")
-        if self.fixed_count:
-            parts.append(f"{self.fixed_count} fixed")
-        if self.still_count:
-            parts.append(f"{self.still_count} still broken")
+        if self.found_pages_count:
+            parts.append(f"{self.found_pages_count} found")
+        if self.fixed_pages_count:
+            parts.append(f"{self.fixed_pages_count} fixed")
+        if self.still_pages_count:
+            parts.append(f"{self.still_pages_count} still broken")
         return ", ".join(parts) if parts else "nothing broken"
 
 
@@ -132,6 +181,29 @@ class DayReport:
     @property
     def fixed_count(self) -> int:
         return sum(check.fixed_count for check in self.checks)
+
+    @property
+    def fixed_pages_count(self) -> int:
+        return len(
+            {
+                page
+                for check in self.checks
+                for site in check.sites
+                for page in site.fixed_pages
+            }
+        )
+
+    @property
+    def found_pages_count(self) -> int:
+        """Distinct pages newly broken across the day, counted once each."""
+        return len(
+            {
+                page
+                for check in self.checks
+                for site in check.sites
+                for page in site.found_pages
+            }
+        )
 
     @property
     def sites_touched(self) -> int:
